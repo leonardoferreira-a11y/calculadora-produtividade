@@ -790,10 +790,22 @@ export default function RegistrosTempo() {
       if (robo.espiral) {
           mqEspFinal = maquinasCargadas.find(m => String(m.id) === robo.espiral);
       } else {
-          if (paginas < 450) {
-              const isDigital = techMiolo.includes("DIGITAL");
+          const isLogprint = String(item.grafica || '').toUpperCase() === 'LOGPRINT';
+          const devoUsarAutoSemi = isLogprint || paginas < 450;
+
+          if (devoUsarAutoSemi) {
+              let isDigital: boolean;
+              if (isLogprint && mqImp) {
+                  // Para Logprint: usa a tecnologia da máquina de Impressão 1.1 selecionada
+                  const tipoImp = String(mqImp.tipo || '').toUpperCase();
+                  const modImp = String(mqImp.modelo || '').toUpperCase();
+                  isDigital = tipoImp.includes('DIGITAL') || modImp.includes('DIGITAL');
+              } else {
+                  isDigital = techMiolo.includes("DIGITAL");
+              }
+              // Digital → semiautomático Digital; Offset/outro → automático Offset
               const keyword = isDigital ? 'semi' : 'auto';
-              
+
               const autoMqs = maquinasCargadas.filter(m => {
                   const t = String(m.tipo || '').toLowerCase();
                   const mod = String(m.modelo || '').toLowerCase();
