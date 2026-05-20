@@ -198,7 +198,8 @@ export default function DashboardFluxoGargalos() {
       if (!maqMap[mqId]) {
         const nomeMacro = obterNomeFluxo(t.nome_etapa, t.maq_tipo);
         const modeloMaquina = t.maq_modelo || mqId;
-        const tituloComposto = `${nomeMacro.toUpperCase()} - ${modeloMaquina}`;
+        const isNumericId = /^\d+$/.test(String(modeloMaquina).trim());
+        const tituloComposto = isNumericId ? nomeMacro.toUpperCase() : `${nomeMacro.toUpperCase()} - ${modeloMaquina}`;
 
         maqMap[mqId] = {
           id: mqId, nome: tituloComposto, setor: t.maq_tipo || 'Geral', ordem: obterOrdemSetor(t.nome_etapa, t.maq_tipo),
@@ -418,7 +419,7 @@ export default function DashboardFluxoGargalos() {
                     <div key={idx} className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col w-full overflow-hidden">
                       <header className="bg-slate-50 border-b p-3 px-5 flex justify-between items-center">
                         <h3 className="font-black text-slate-700 text-sm uppercase flex items-center gap-2">
-                          <i className="fas fa-microchip text-slate-400"></i> {mq.ordem}. {mq.nome}
+                          <i className="fas fa-microchip text-slate-400"></i> {mq.nome}
                         </h3>
                         <span className="text-xs font-mono font-bold text-slate-500 bg-slate-200/80 px-3 py-1.5 rounded-lg border border-slate-300">
                           {mq.tarefas.length} O.S. na Fila

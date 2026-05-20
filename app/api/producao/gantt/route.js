@@ -22,28 +22,35 @@ export async function POST(request) {
     const maquinasReais = resMaquinas.rows;
 
     const resTarefas = await pool.query(
-      `SELECT t.id, t.sku_alvo, t.filtro_producao, t.grafica, t.nome_etapa, t.maquina_id, 
-              t.tempo_estimado_horas, t.id_dependencia, t.status_tarefa, 
+      `SELECT t.id, t.sku_alvo, t.filtro_producao, t.grafica, t.nome_etapa, t.maquina_id,
+              t.tempo_estimado_horas, t.id_dependencia, t.status_tarefa,
               m.tipo AS maq_tipo, m.modelo AS maq_modelo,
               COALESCE(m.dias_trabalho, 5) AS dias_trabalho,
               COALESCE(m.horas_diarias, 24) AS horas_diarias,
               COALESCE(m.maquinas, 1) AS total_maquinas_parque,
               COALESCE(m.pessoas, 1) AS total_pessoas_parque,
-              CASE 
-                WHEN NULLIF(d.dt_calculo, '') IS NOT NULL THEN 
-                  CASE 
+              pm.tiragem AS pm_tiragem,
+              pm.paginacao AS pm_paginacao,
+              pm.acabamento AS pm_acabamento,
+              CASE
+                WHEN NULLIF(d.dt_calculo, '') IS NOT NULL THEN
+                  CASE
                     WHEN d.dt_calculo LIKE '%/%' THEN to_timestamp(d.dt_calculo, 'DD/MM/YY HH24:MI')
                     ELSE d.dt_calculo::timestamp
                   END
-                ELSE CURRENT_TIMESTAMP 
+                ELSE CURRENT_TIMESTAMP
               END AS ideal_inicio
        FROM gantt_tarefas t
        LEFT JOIN maquinas m ON TRIM(t.maquina_id) = TRIM(m.id::text)
-       LEFT JOIN prod_datas_iniciais d 
-         ON UPPER(TRIM(t.sku_alvo)) = UPPER(TRIM(d.sku)) 
-        AND UPPER(TRIM(t.filtro_producao)) = UPPER(TRIM(d.filtro_producao)) 
+       LEFT JOIN prod_datas_iniciais d
+         ON UPPER(TRIM(t.sku_alvo)) = UPPER(TRIM(d.sku))
+        AND UPPER(TRIM(t.filtro_producao)) = UPPER(TRIM(d.filtro_producao))
         AND UPPER(TRIM(t.grafica)) = UPPER(TRIM(d.grafica))
-       WHERE UPPER(TRIM(t.grafica)) = UPPER(TRIM($1))`, 
+       LEFT JOIN prod_miolo pm
+         ON UPPER(TRIM(t.sku_alvo)) = UPPER(TRIM(pm.sku_miolo))
+        AND UPPER(TRIM(t.filtro_producao)) = UPPER(TRIM(pm.filtro_producao))
+        AND UPPER(TRIM(t.grafica)) = UPPER(TRIM(pm.grafica))
+       WHERE UPPER(TRIM(t.grafica)) = UPPER(TRIM($1))`,
       [grafica]
     );
 
@@ -374,13 +381,11 @@ export async function POST(request) {
       // 🔴 Atualiza a memória da máquina para o próximo lote do loop!
       ultimaAtividadeMaquina[mqId] = janelaFinal.fim;
 
-      let dadosTooltip = {};
-      if (tarefa.dados_calculo) {
-        try {
-          const js = typeof tarefa.dados_calculo === 'string' ? JSON.parse(tarefa.dados_calculo) : tarefa.dados_calculo;
-          dadosTooltip = { tiragem: js.config?.tiragem || js.tiragem || 'N/A', formato: js.config?.formatoFechado || 'N/A' };
-        } catch(e) {}
-      }
+      const dadosTooltip = {
+        tiragem: tarefa.pm_tiragem || 'N/A',
+        paginacao: tarefa.pm_paginacao || 'N/A',
+        acabamento: tarefa.pm_acabamento || 'N/A',
+      };
 
       const novaResolvida = {
         id: String(tarefa.id),

@@ -62,8 +62,8 @@ export default function GanttIndustrial() {
     if (t.includes('corte') || t.includes('vinco') || e.includes('corte')) return 'Corte e Vinco';
     if (t.includes('shrink') || t.includes('encaixot') || e.includes('shrink') || e.includes('box') || t.includes('kit') || e.includes('kit')) return 'Formação de Kit';
     
-    // 🔴 CORREÇÃO AQUI: Agora Coladeiras e PUR também vão obrigatoriamente para a pista de Alceadeira!
-    if (t.includes('alceade') || e.includes('alcead') || t.includes('cola') || e.includes('cola') || t.includes('pur') || e.includes('pur')) return 'Alceadeira';
+    if (t.includes('alceade') || e.includes('alcead')) return 'Alceadeira';
+    if (t.includes('cola') || e.includes('cola') || t.includes('pur') || e.includes('pur')) return 'Acabamentos Finais';
     
     return 'Acabamentos Finais'; 
   };
@@ -356,17 +356,22 @@ export default function GanttIndustrial() {
               </div>
 
               <div className="flex items-center gap-1 bg-slate-700 p-1 rounded border border-slate-600">
-                <button onClick={() => setVisao('DIAS')} className={`text-[10px] font-bold px-3 py-1 rounded ${visao === 'DIAS' ? 'bg-violet-500 text-white' : 'text-slate-300'}`}>DIAS</button>
-                <button onClick={() => setVisao('SEMANAS')} className={`text-[10px] font-bold px-3 py-1 rounded ${visao === 'SEMANAS' ? 'bg-violet-500 text-white' : 'text-slate-300'}`}>SEMANAS</button>
-                <button onClick={() => setVisao('MESES')} className={`text-[10px] font-bold px-3 py-1 rounded ${visao === 'MESES' ? 'bg-violet-500 text-white' : 'text-slate-300'}`}>MESES</button>
+                <button onClick={() => setVisao('DIAS')} className={`text-[10px] font-bold px-3 py-1 rounded cursor-pointer transition-all duration-200 active:scale-95 ${visao === 'DIAS' ? 'bg-violet-500 text-white' : 'text-slate-300 hover:bg-slate-600 hover:text-white'}`}>DIAS</button>
+                <button onClick={() => setVisao('SEMANAS')} className={`text-[10px] font-bold px-3 py-1 rounded cursor-pointer transition-all duration-200 active:scale-95 ${visao === 'SEMANAS' ? 'bg-violet-500 text-white' : 'text-slate-300 hover:bg-slate-600 hover:text-white'}`}>SEMANAS</button>
+                <button onClick={() => setVisao('MESES')} className={`text-[10px] font-bold px-3 py-1 rounded cursor-pointer transition-all duration-200 active:scale-95 ${visao === 'MESES' ? 'bg-violet-500 text-white' : 'text-slate-300 hover:bg-slate-600 hover:text-white'}`}>MESES</button>
               </div>
 
               <div className="relative">
-                <button onClick={() => setShowFiltroLote(!showFiltroLote)} className="bg-slate-700 border border-slate-600 text-white font-bold px-3 py-1.5 rounded text-xs flex items-center gap-2"><i className="fas fa-filter"></i> Lotes ({lotesAtivos.length === 0 ? 'Todos' : lotesAtivos.length})</button>
+                <button onClick={() => setShowFiltroLote(!showFiltroLote)} className="bg-slate-700 border border-slate-600 text-white font-bold px-3 py-1.5 rounded text-xs flex items-center gap-2 cursor-pointer hover:bg-slate-600 transition-all duration-200 active:scale-95"><i className="fas fa-filter"></i> Lotes ({lotesAtivos.length === 0 ? 'Todos' : lotesAtivos.length})</button>
                 {showFiltroLote && (
                   <div className="absolute top-full right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border p-3 z-[9000]">
-                    <div className="flex justify-between items-center mb-2 border-b pb-1"><span className="text-[10px] font-black uppercase text-slate-500">Lotes</span><button onClick={() => setLotesAtivos([])} className="text-[10px] text-violet-600 font-bold">Limpar</button></div>
-                    {/* 🔴 CORREÇÃO DO REACT KEY: Adicionado 'idx' e tratamento de valores nulos */}
+                    <div className="flex justify-between items-center mb-2 border-b pb-1">
+                      <span className="text-[10px] font-black uppercase text-slate-500">Lotes</span>
+                      <div className="flex gap-2">
+                        <button onClick={() => setLotesAtivos(lotesExistentes as string[])} className="text-[10px] text-emerald-600 font-bold hover:underline cursor-pointer">Todos</button>
+                        <button onClick={() => setLotesAtivos([])} className="text-[10px] text-violet-600 font-bold hover:underline cursor-pointer">Limpar</button>
+                      </div>
+                    </div>
                     <div className="max-h-64 overflow-y-auto space-y-1">
                       {lotesExistentes.map((lote, idx) => (
                         <label key={`lote-filter-${idx}`} className="flex items-center gap-2 text-xs font-bold text-slate-700 p-1 hover:bg-slate-50 rounded cursor-pointer">
@@ -408,7 +413,7 @@ export default function GanttIndustrial() {
 
                           return (
                             <div key={`${setor}-${mq.id}`} style={{ height: `${alturaLinhaCalculada}px` }} className="border-b px-4 py-1.5 flex flex-col justify-center bg-white border-r hover:bg-slate-50/60 transition-all border-b-slate-200">
-                              <span className="text-xs font-bold text-slate-800 truncate" title={mq.modelo}>{mq.modelo}</span>
+                              <span className="text-xs font-bold text-slate-800 truncate" title={`[${mq.tipo || 'Geral'}] ${mq.modelo}`}>[{mq.tipo || 'Geral'}] {mq.modelo}</span>
                               <div className="flex justify-between items-center gap-1 mt-1 text-[9px]">
                                 <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded border border-slate-200">
                                   <span className="text-slate-400 font-mono font-bold">Usar:</span>
@@ -500,7 +505,7 @@ export default function GanttIndustrial() {
                                 const dtFim = new Date(tarefa.data_fim).toLocaleString('pt-BR', { timeZone: 'UTC', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
                                 const dadosExtras = tarefa.dados_tooltip || {};
                                 
-                                const tooltipTexto = `📋 LOTE: ${tarefa.filtro_producao}\n🔖 SKU: ${tarefa.sku_alvo}\n⚙️ ETAPA: ${tarefa.nome_etapa}\n📦 Tiragem: ${dadosExtras.tiragem || 'N/A'}\n\n⏱️ Duração Teórica Bruta: ${Number(tarefa.tempo_estimado_horas).toFixed(2)}h\n⏱️ Carga Ativa Ocupada: ${Number(tarefa.tempo_producao_efetivo).toFixed(2)}h\n\n🛑 Tempo Retido em Fila (Espera): ${Number(tarefa.tempo_espera_fila || 0).toFixed(2)}h\n🛑 Horas Indisponíveis (Madrugadas / Regra): ${Number(tarefa.tempo_indisponivel_regra || 0).toFixed(2)}h\n\n🟢 INÍCIO EFETIVO: ${dtInicio}\n🔴 FINAL OPERAÇÃO: ${dtFim}`;
+                                const tooltipTexto = `📋 LOTE: ${tarefa.filtro_producao}\n🔖 SKU: ${tarefa.sku_alvo}\n⚙️ ETAPA: ${tarefa.nome_etapa}\n📦 Tiragem: ${dadosExtras.tiragem || 'N/A'}\n📄 Paginação: ${dadosExtras.paginacao || 'N/A'}\n🎨 Acabamento: ${dadosExtras.acabamento || 'N/A'}\n\n⏱️ Duração Teórica Bruta: ${Number(tarefa.tempo_estimado_horas).toFixed(2)}h\n⏱️ Carga Ativa Ocupada: ${Number(tarefa.tempo_producao_efetivo).toFixed(2)}h\n\n🛑 Tempo Retido em Fila (Espera): ${Number(tarefa.tempo_espera_fila || 0).toFixed(2)}h\n🛑 Horas Indisponíveis (Madrugadas / Regra): ${Number(tarefa.tempo_indisponivel_regra || 0).toFixed(2)}h\n\n🟢 INÍCIO EFETIVO: ${dtInicio}\n🔴 FINAL OPERAÇÃO: ${dtFim}`;
 
                                 const larguraNumerica = typeof pos.width === 'number' ? pos.width : parseFloat(String(pos.width) || '0');
                                 return (
