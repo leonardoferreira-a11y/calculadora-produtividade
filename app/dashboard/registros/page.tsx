@@ -335,16 +335,36 @@ export default function RegistrosTempo() {
     return bestMachine;
   };
 
-  const getMaquinaEspiralAdequada = (lombada: number) => {
-    const espirais = maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('espiral') || String(m.tipo || '').toLowerCase().includes('wire'));
+  const getMaquinaEspiralAdequada = (lombada: number, maquinaImpressao?: any) => {
+    const espirais = maquinasCargadas.filter(m =>
+      String(m.tipo || '').toLowerCase().includes('espiral') ||
+      String(m.tipo || '').toLowerCase().includes('wire')
+    );
     if (espirais.length === 0) return null;
 
-    let manuais = espirais.filter(m => String(m.tipo || '').toLowerCase().includes('manual') || String(m.modelo || '').toLowerCase().includes('manual'));
-    if (manuais.length === 0) manuais = espirais; 
-    
-    const validas = manuais.filter(m => Number(m.limite_lombada || 0) >= lombada);
-    if (validas.length > 0) return validas.sort((a, b) => Number(a.limite_lombada || 0) - Number(b.limite_lombada || 0))[0];
-    return manuais.sort((a, b) => Number(b.limite_lombada || 0) - Number(a.limite_lombada || 0))[0];
+    // PASSO A: menor limite >= lombada; se nenhuma cabe, usa a de maior limite
+    const validas = espirais.filter(m => Number(m.limite_lombada || 0) >= lombada);
+    const candidata = validas.length > 0
+      ? validas.sort((a, b) => Number(a.limite_lombada) - Number(b.limite_lombada))[0]
+      : espirais.sort((a, b) => Number(b.limite_lombada) - Number(a.limite_lombada))[0];
+    if (!candidata) return null;
+
+    // PASSO B: a candidata é uma máquina AUTOMÁTICA?
+    const modC = String(candidata.modelo || '').toUpperCase();
+    const isAutomatica = modC.includes('AUTOMÁTIC') || modC.includes('AUTOMATIC');
+
+    if (isAutomatica && maquinaImpressao) {
+      // PASSO C: desvia para a variante correta pela tecnologia da Impressão 1.1
+      const tipoImp = String(maquinaImpressao.tipo || '').toUpperCase();
+      const modImp = String(maquinaImpressao.modelo || '').toUpperCase();
+      const isDigital = tipoImp.includes('DIGITAL') || modImp.includes('DIGITAL');
+      const targetNome = isDigital ? 'ESPIRAL AUTOMÁTICA - DIGITAL' : 'ESPIRAL AUTOMÁTICA - OFFSET';
+      const maqEspecifica = maquinasCargadas.find(m =>
+        String(m.modelo || '').toUpperCase().trim() === targetNome
+      );
+      if (maqEspecifica) return maqEspecifica; // PASSO D
+    }
+    return candidata;
   };
 
   // ----------------------------------------------------------------------
@@ -786,35 +806,9 @@ export default function RegistrosTempo() {
       const mqFur = robo.furacao ? maquinasCargadas.find(m => String(m.id) === robo.furacao) : getMaquinaMaisRapida('Furação', 'Espiral');
       
       const lombadaNum = Number(String(item.lombada || '0').replace(',', '.'));
-      let mqEspFinal = null;
-      if (robo.espiral) {
-          mqEspFinal = maquinasCargadas.find(m => String(m.id) === robo.espiral);
-      } else {
-          const isLogprint = String(item.grafica || '').toUpperCase() === 'LOGPRINT';
-          const devoUsarAutoSemi = isLogprint || paginas < 450;
-
-          if (devoUsarAutoSemi) {
-              let isDigital: boolean;
-              if (isLogprint && mqImp) {
-                  // Para Logprint: usa a tecnologia da máquina de Impressão 1.1 selecionada
-                  const tipoImp = String(mqImp.tipo || '').toUpperCase();
-                  const modImp = String(mqImp.modelo || '').toUpperCase();
-                  isDigital = tipoImp.includes('DIGITAL') || modImp.includes('DIGITAL');
-              } else {
-                  isDigital = techMiolo.includes("DIGITAL");
-              }
-              // Digital → semiautomático Digital; Offset/outro → automático Offset
-              const keyword = isDigital ? 'semi' : 'auto';
-
-              const autoMqs = maquinasCargadas.filter(m => {
-                  const t = String(m.tipo || '').toLowerCase();
-                  const mod = String(m.modelo || '').toLowerCase();
-                  return t.includes('espiral') && (t.includes(keyword) || mod.includes(keyword)) && Number(m.limite_lombada || 0) >= lombadaNum;
-              });
-              if (autoMqs.length > 0) mqEspFinal = autoMqs.sort((a,b) => Number(b.produtividade_unit||0) - Number(a.produtividade_unit||0))[0];
-          }
-          if (!mqEspFinal) mqEspFinal = getMaquinaEspiralAdequada(lombadaNum);
-      }
+      const mqEspFinal = robo.espiral
+          ? maquinasCargadas.find(m => String(m.id) === robo.espiral)
+          : getMaquinaEspiralAdequada(lombadaNum, mqImp);
 
       const encarteItem = encartesDoLote.find(e => String(e.sku_miolo) === String(item.sku_miolo));
       const tiragemEnc = encarteItem ? Number(encarteItem.tiragem || item.tiragem) : tiragem;
@@ -1433,18 +1427,7 @@ export default function RegistrosTempo() {
                         const mqGraRec = getMaquinaMaisRapida('Grampo', 'Canoa');
                         const mqFurRec = getMaquinaMaisRapida('Furação', 'Espiral');
                         
-                        let mqEspRec = null;
-                        if (paginas < 450) {
-                            const isDigital = techMiolo.includes("DIGITAL");
-                            const keyword = isDigital ? 'semi' : 'auto';
-                            const autoMqs = maquinasCargadas.filter(m => {
-                                const t = String(m.tipo || '').toLowerCase();
-                                const mod = String(m.modelo || '').toLowerCase();
-                                return t.includes('espiral') && (t.includes(keyword) || mod.includes(keyword)) && Number(m.limite_lombada || 0) >= lombNum;
-                            });
-                            if (autoMqs.length > 0) mqEspRec = autoMqs.sort((a,b) => Number(b.produtividade_unit||0) - Number(a.produtividade_unit||0))[0];
-                        }
-                        if (!mqEspRec) mqEspRec = getMaquinaEspiralAdequada(lombNum);
+                        const mqEspRec = getMaquinaEspiralAdequada(lombNum, mqImpRec);
 
                         setIdMaquinaImpressao(temCalculo && src.impressao?.maquina_id ? String(src.impressao.maquina_id) : (mqImpRec ? String(mqImpRec.id) : ''));
                         setIdMaquinaImpressaoCapa(temCalculo && src.impressao_capa?.maquina_id ? String(src.impressao_capa.maquina_id) : (mqImpCapRec ? String(mqImpCapRec.id) : ''));
