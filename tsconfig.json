@@ -29,6 +29,6 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     "**/*.mts"
-  ],
+, "app/api/producao/gantt/route.js"  ],
   "exclude": ["node_modules"]
 }

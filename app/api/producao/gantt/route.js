@@ -1,0 +1,429 @@
+import pool from '@/lib/db';
+import { NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300; 
+
+// 🔴 AUXILIAR: Transforma "04:00" em 4.0 horas decimais
+const timeToDecimal = (timeStr) => {
+  if (!timeStr || !timeStr.includes(':')) return 0;
+  const hm = timeStr.split(':');
+  return parseInt(hm[0]) + (parseInt(hm[1]) / 60);
+};
+
+export async function POST(request) {
+  try {
+    const body = await request.json();
+    const { grafica, simuladores = {} } = body;
+
+    if (!grafica) return NextResponse.json({ message: "Gráfica é obrigatória." }, { status: 400 });
+
+    const resMaquinas = await pool.query(`SELECT * FROM maquinas WHERE UPPER(TRIM(grafica)) = UPPER(TRIM($1))`, [grafica]);
+    const maquinasReais = resMaquinas.rows;
+
+    const resTarefas = await pool.query(
+      `SELECT t.id, t.sku_alvo, t.filtro_producao, t.grafica, t.nome_etapa, t.maquina_id, 
+              t.tempo_estimado_horas, t.id_dependencia, t.status_tarefa, 
+              m.tipo AS maq_tipo, m.modelo AS maq_modelo,
+              COALESCE(m.dias_trabalho, 5) AS dias_trabalho,
+              COALESCE(m.horas_diarias, 24) AS horas_diarias,
+              COALESCE(m.maquinas, 1) AS total_maquinas_parque,
+              COALESCE(m.pessoas, 1) AS total_pessoas_parque,
+              CASE 
+                WHEN NULLIF(d.dt_calculo, '') IS NOT NULL THEN 
+                  CASE 
+                    WHEN d.dt_calculo LIKE '%/%' THEN to_timestamp(d.dt_calculo, 'DD/MM/YY HH24:MI')
+                    ELSE d.dt_calculo::timestamp
+                  END
+                ELSE CURRENT_TIMESTAMP 
+              END AS ideal_inicio
+       FROM gantt_tarefas t
+       LEFT JOIN maquinas m ON TRIM(t.maquina_id) = TRIM(m.id::text)
+       LEFT JOIN prod_datas_iniciais d 
+         ON UPPER(TRIM(t.sku_alvo)) = UPPER(TRIM(d.sku)) 
+        AND UPPER(TRIM(t.filtro_producao)) = UPPER(TRIM(d.filtro_producao)) 
+        AND UPPER(TRIM(t.grafica)) = UPPER(TRIM(d.grafica))
+       WHERE UPPER(TRIM(t.grafica)) = UPPER(TRIM($1))`, 
+      [grafica]
+    );
+
+    const resTravas = await pool.query(
+      `SELECT maquina_id, data_alvo::text AS data_alvo, status_operacional, horas_disponiveis 
+       FROM gantt_calendario_trava 
+       WHERE UPPER(TRIM(grafica)) = UPPER(TRIM($1))`, 
+      [grafica]
+    );
+
+    const travasBD = resTravas.rows;
+    const tarefasResolvidas = [];
+    const controleMaquinasFim = {}; 
+    const ultimaAtividadeMaquina = {}; // 🔴 MEMÓRIA: Guarda a hora do último término de cada máquina
+    const UPPER_CASE = (str) => String(str || '').toUpperCase().trim();
+
+    const travasMap = new Map();
+    travasBD.forEach(t => {
+      const dataStr = t.data_alvo.substring(0, 10);
+      travasMap.set(`${UPPER_CASE(t.maquina_id)}_${dataStr}`, t);
+    });
+
+    const resolvidasMap = new Map();
+    const resolvidasPorSku = new Map();
+    const indefinitasPorSku = new Map();
+    const indefinitasById = new Map();
+
+    let indefinitas = resTarefas.rows.map(t => {
+        const nomeE = String(t.nome_etapa).toLowerCase();
+        const maqT = String(t.maq_tipo).toLowerCase();
+        const maqM = String(t.maq_modelo).toLowerCase();
+        return {
+            ...t,
+            _skuUp: UPPER_CASE(t.sku_alvo),
+            _idUp: UPPER_CASE(t.id),
+            _depUp: t.id_dependencia ? UPPER_CASE(t.id_dependencia) : null,
+            _isFura: nomeE.includes('fura'),
+            _isAlc: nomeE.includes('alcead') || nomeE.includes('cola'),
+            _isEspiral: nomeE.includes('espiral'),
+            _isDobra: nomeE.includes('dobra') || maqT.includes('dobra'),
+            _isImp: nomeE.includes('impress') || maqT.includes('impress'),
+            _isPUR: maqT.toUpperCase().includes('PUR') || maqM.toUpperCase().includes('PUR') || maqT.toUpperCase().includes('COLADEIRA'),
+            _isManualEspiral: nomeE.includes('espiral') && (
+                maqT.includes('manual') || maqM.includes('manual') ||
+                (!maqT.includes('auto') && !maqT.includes('semi') && !maqM.includes('auto') && !maqM.includes('semi'))
+            )
+        };
+    });
+
+    indefinitas.forEach(t => {
+      if (!indefinitasPorSku.has(t._skuUp)) indefinitasPorSku.set(t._skuUp, []);
+      indefinitasPorSku.get(t._skuUp).push(t);
+      indefinitasById.set(t._idUp, t);
+    });
+
+    const formataAbsoluto = (d) => {
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}Z`;
+    };
+
+    const alinharProximoTurnoValido = (data, diasTrabalho, horasDiarias) => {
+      let r = new Date(data);
+      let limiteSafety = 365;
+      while (limiteSafety > 0) {
+        limiteSafety--;
+        const diaSemana = r.getUTCDay(); 
+        if (Number(diasTrabalho) === 5 && (diaSemana === 0 || diaSemana === 6)) {
+          r.setUTCDate(r.getUTCDate() + (diaSemana === 6 ? 2 : 1));
+          r.setUTCHours(0, 0, 0, 0); continue;
+        }
+        if (Number(diasTrabalho) === 6 && diaSemana === 0) {
+          r.setUTCDate(r.getUTCDate() + 1);
+          r.setUTCHours(0, 0, 0, 0); continue;
+        }
+        const horaAtualDecimal = r.getUTCHours() + (r.getUTCMinutes() / 60);
+        if (horaAtualDecimal >= Number(horasDiarias)) {
+          r.setUTCDate(r.getUTCDate() + 1);
+          r.setUTCHours(0, 0, 0, 0); continue;
+        }
+        break;
+      }
+      return r;
+    };
+
+    const simularJanelaDeTrabalho = (dataInicioStr, horasNecessarias, maquinaId, diasTrabalhoBase, horasDiariasBase) => {
+      let relogio = alinharProximoTurnoValido(dataInicioStr, diasTrabalhoBase, horasDiariasBase);
+      let horasFaltantes = Number(horasNecessarias);
+      let dataInicioEfetivo = new Date(relogio);
+      let horasIndisponiveisRegra = 0;
+      let limiteLoops = 1500; 
+
+      while (horasFaltantes > 0 && limiteLoops > 0) {
+        limiteLoops--;
+        let relogioAntes = new Date(relogio);
+        relogio = alinharProximoTurnoValido(relogio, diasTrabalhoBase, horasDiariasBase);
+        
+        if (relogio.getTime() > relogioAntes.getTime()) horasIndisponiveisRegra += (relogio.getTime() - relogioAntes.getTime()) / (1000 * 60 * 60);
+
+        const ano = relogio.getUTCFullYear();
+        const mes = String(relogio.getUTCMonth() + 1).padStart(2, '0');
+        const dia = String(relogio.getUTCDate()).padStart(2, '0');
+        const dataAlvoStr = `${ano}-${mes}-${dia}`;
+
+        const travaHoje = travasMap.get(`${UPPER_CASE(maquinaId)}_${dataAlvoStr}`);
+        let capacityHoje = Number(horasDiariasBase || 24);
+
+        if (travaHoje) {
+          if (travaHoje.status_operacional === 'INATIVO') capacityHoje = 0;
+          else capacityHoje = Number(travaHoje.horas_disponiveis);
+        }
+
+        const fimTurno = capacityHoje;
+        const horasNoMomento = relogio.getUTCHours() + (relogio.getUTCMinutes() / 60) + (relogio.getUTCSeconds() / 3600);
+        const capacidadeRestanteHoje = Math.max(0, fimTurno - horasNoMomento);
+
+        if (capacidadeRestanteHoje >= horasFaltantes) {
+          const horasFinais = horasNoMomento + horasFaltantes;
+          const h = Math.floor(horasFinais);
+          const m = Math.floor((horasFinais - h) * 60);
+          const s = Math.round((((horasFinais - h) * 60) - m) * 60);
+          relogio.setUTCHours(h, m, s, 0);
+          horasFaltantes = 0;
+        } else {
+          horasFaltantes -= capacidadeRestanteHoje;
+          horasIndisponiveisRegra += (24 - capacityHoje);
+          relogio.setUTCDate(relogio.getUTCDate() + 1);
+          relogio.setUTCHours(0, 0, 0, 0);
+        }
+      }
+      return { inicio: dataInicioEfetivo, fim: relogio, horasIndisponiveisRegra };
+    };
+
+    let travaSeguranca = indefinitas.length * 6;
+    let loopContador = 0;
+
+    while (indefinitas.length > 0 && travaSeguranca > 0) {
+      travaSeguranca--;
+      loopContador++;
+
+      if (loopContador % 50 === 0) {
+        await new Promise(resolve => setTimeout(resolve, 1));
+      }
+
+      let candidatosAptos = [];
+
+      for (const t of indefinitas) {
+        let tempoProntidaoTecnica = new Date(t.ideal_inicio);
+        let prontoParaAgendar = true;
+        let pai = null;
+        let delayCuraMs = 0;
+
+        if (t._depUp) {
+          pai = resolvidasMap.get(t._depUp);
+          if (!pai) {
+            const idDepLower = t._depUp.toLowerCase();
+            let termoBusca = idDepLower.includes('imp') ? 'impressão' : 
+                             idDepLower.includes('dob') ? 'dobra' : 
+                             idDepLower.includes('col') ? 'cola' : 
+                             idDepLower.includes('empast') ? 'empast' : 
+                             idDepLower.includes('bene') ? 'benefic' : '';
+            if (termoBusca) {
+              const skuTasks = resolvidasPorSku.get(t._skuUp) || [];
+              pai = skuTasks.find(r => r.nome_etapa.toLowerCase().includes(termoBusca));
+            }
+          }
+        }
+
+        if (t._isFura) {
+          const skuResolvidas = resolvidasPorSku.get(t._skuUp) || [];
+          const alcResolvida = skuResolvidas.find(r => r._isAlc);
+          if (alcResolvida) {
+            if (!pai || new Date(alcResolvida.data_fim) > new Date(pai.data_fim)) pai = alcResolvida;
+          } else {
+            const skuIndef = indefinitasPorSku.get(t._skuUp) || [];
+            if (skuIndef.some(r => r._isAlc)) prontoParaAgendar = false;
+          }
+        }
+
+        if (pai && prontoParaAgendar) {
+          if (pai._isAlc && pai._isPUR) delayCuraMs = 24 * 60 * 60 * 1000;
+
+          if (t._isEspiral && pai._isFura) {
+            let mqIdPreview = t._isManualEspiral ? 'ESPIRALAR_MANUAL_UNIFIED' : String(t.maquina_id || '').trim();
+            const simPreview = simuladores[mqIdPreview] || {};
+            const maxP = Math.max(1, Number(t.total_maquinas_parque || 1), Number(t.total_pessoas_parque || 1));
+            const nUsadas = Math.min(maxP, Math.max(1, Number(simPreview.usadas || 1)));
+            const modoPrev = String(simPreview.modo || 'DILUIR').toUpperCase();
+            
+            let tempoGastoPelaEspiral = Number(t.tempo_estimado_horas) || 0.016;
+            if (modoPrev !== 'CONCORRENTE') tempoGastoPelaEspiral = tempoGastoPelaEspiral / nUsadas;
+            const tempoPaiReal = pai.tempo_producao_efetivo || 0;
+
+            if (tempoGastoPelaEspiral >= tempoPaiReal) {
+              tempoProntidaoTecnica = new Date(pai.data_inicio);
+              tempoProntidaoTecnica.setUTCHours(tempoProntidaoTecnica.getUTCHours() + 1);
+            } else {
+              const milisegundosDeRetardo = (1 - tempoGastoPelaEspiral) * 60 * 60 * 1000;
+              tempoProntidaoTecnica = new Date(new Date(pai.data_fim).getTime() + milisegundosDeRetardo);
+            }
+            if (tempoProntidaoTecnica < new Date(pai.data_inicio)) tempoProntidaoTecnica = new Date(pai.data_inicio);
+          
+          } else if (t._isDobra && pai._isImp) {
+            let mqIdPreview = String(t.maquina_id || '').trim();
+            const simPreview = simuladores[mqIdPreview] || {};
+            const maxP = Math.max(1, Number(t.total_maquinas_parque || 1), Number(t.total_pessoas_parque || 1));
+            const nUsadas = Math.min(maxP, Math.max(1, Number(simPreview.usadas || 1)));
+            const modoPrev = String(simPreview.modo || 'DILUIR').toUpperCase();
+
+            let tempoGastoDobra = Number(t.tempo_estimado_horas) || 0.016;
+            if (modoPrev !== 'CONCORRENTE') tempoGastoDobra = tempoGastoDobra / nUsadas;
+
+            const fimPaiMs = new Date(pai.data_fim).getTime();
+            const inicioPaiMs = new Date(pai.data_inicio).getTime();
+
+            let trtMs = fimPaiMs + (24 * 60 * 60 * 1000) - (tempoGastoDobra * 60 * 60 * 1000);
+            const limiteMinimoMs = inicioPaiMs + (2 * 60 * 60 * 1000);
+            if (trtMs < limiteMinimoMs) {
+              trtMs = limiteMinimoMs;
+            }
+            tempoProntidaoTecnica = new Date(trtMs);
+
+          } else {
+            tempoProntidaoTecnica = new Date(new Date(pai.data_fim).getTime() + delayCuraMs);
+          }
+        } else if (!pai && t._depUp && indefinitasById.has(t._depUp)) {
+          prontoParaAgendar = false;
+        }
+
+        if (prontoParaAgendar) candidatosAptos.push({ tarefa: t, trt: tempoProntidaoTecnica });
+      }
+
+      if (candidatosAptos.length === 0 && indefinitas.length > 0) {
+        candidatosAptos.push({ tarefa: indefinitas[0], trt: new Date(indefinitas[0].ideal_inicio) });
+      }
+      if (candidatosAptos.length === 0) break;
+      
+      candidatosAptos.sort((a, b) => a.trt.getTime() - b.trt.getTime());
+
+      const { tarefa, trt } = candidatosAptos[0];
+      let mqId = String(tarefa.maquina_id || '').trim();
+      let diasTrabBase = tarefa.dias_trabalho;
+      let horasDiariasBase = tarefa.horas_diarias;
+
+      if (tarefa._isManualEspiral) {
+        mqId = 'ESPIRALAR_MANUAL_UNIFIED';
+        const espiraisFisicas = maquinasReais.filter(m => 
+          (String(m.tipo).toLowerCase().includes('espiral') || String(m.modelo).toLowerCase().includes('espiral')) &&
+          (String(m.tipo).toLowerCase().includes('manual') || String(m.modelo).toLowerCase().includes('manual') ||
+          (!String(m.tipo).toLowerCase().includes('auto') && !String(m.tipo).toLowerCase().includes('semi') &&
+           !String(m.modelo).toLowerCase().includes('auto') && !String(m.modelo).toLowerCase().includes('semi')))
+        );
+        if (espiraisFisicas.length > 0) {
+          diasTrabBase = espiraisFisicas[0].dias_trabalho || 5;
+          horasDiariasBase = espiraisFisicas[0].horas_diarias || 24;
+          const capacidadeTotalGrupo = espiraisFisicas.reduce((acc, m) => acc + Math.max(Number(m.pessoas || 1), Number(m.maquinas || 1)), 0);
+          tarefa.total_maquinas_parque = capacidadeTotalGrupo;
+          tarefa.total_pessoas_parque = capacidadeTotalGrupo;
+        }
+      }
+
+      let tempoParaOcupacao = new Date(trt);
+
+      const simulacaoDaTela = simuladores[mqId] || {};
+      const limiteMaximoFisico = Math.max(1, Number(tarefa.total_maquinas_parque || 1), Number(tarefa.total_pessoas_parque || 1));
+      const numMaquinasUsadas = Math.min(limiteMaximoFisico, Math.max(1, Number(simulacaoDaTela.usadas || 1)));
+      const modoOperacao = String(simulacaoDaTela.modo || 'DILUIR').toUpperCase();
+
+      if (!controleMaquinasFim[mqId]) {
+        controleMaquinasFim[mqId] = Array(numMaquinasUsadas).fill(null).map(() => new Date(tempoParaOcupacao));
+      } else if (controleMaquinasFim[mqId].length !== numMaquinasUsadas) {
+        const vetorAntigo = [...controleMaquinasFim[mqId]];
+        controleMaquinasFim[mqId] = Array(numMaquinasUsadas).fill(null).map((_, idx) => vetorAntigo[idx] || new Date(tempoParaOcupacao));
+      }
+
+      let dataInicioReal = new Date(tempoParaOcupacao);
+      if (controleMaquinasFim[mqId][0] > dataInicioReal) dataInicioReal = new Date(controleMaquinasFim[mqId][0]);
+
+      let janelaFinal = null;
+      let slotEscolhidoIndex = 0;
+      let tempoRealAlocado = Number(tarefa.tempo_estimado_horas) > 0 ? Number(tarefa.tempo_estimado_horas) : 0.016; 
+      let setupFoiDescontado = false;
+
+      // 🔴 REGRA DE SETUP INTELIGENTE: Se a máquina for Espiral Automática e a folga for < 12h, corta o setup!
+      if (tarefa._isEspiral && !tarefa._isManualEspiral) {
+          const mqData = maquinasReais.find(m => String(m.id) === String(mqId));
+          const lastActivityTime = ultimaAtividadeMaquina[mqId];
+          
+          if (lastActivityTime && mqData && mqData.setup) {
+              const gapHoras = (dataInicioReal.getTime() - lastActivityTime.getTime()) / (1000 * 60 * 60);
+              if (gapHoras <= 12) {
+                  const horasDeSetup = timeToDecimal(mqData.setup);
+                  tempoRealAlocado = Math.max(0.016, tempoRealAlocado - horasDeSetup); // Garante que a barra não zere
+                  setupFoiDescontado = true;
+              }
+          }
+      }
+
+      if (modoOperacao === 'DILUIR') {
+        tempoRealAlocado = tempoRealAlocado / numMaquinasUsadas;
+        janelaFinal = simularJanelaDeTrabalho(dataInicioReal, tempoRealAlocado, mqId, diasTrabBase, horasDiariasBase);
+        for (let s = 0; s < numMaquinasUsadas; s++) controleMaquinasFim[mqId][s] = janelaFinal.fim;
+      } else if (modoOperacao === 'CONCORRENTE') {
+        let menorFimTime = Infinity;
+        for (let s = 0; s < numMaquinasUsadas; s++) {
+          let tDisponivel = controleMaquinasFim[mqId][s] > tempoParaOcupacao ? controleMaquinasFim[mqId][s] : tempoParaOcupacao;
+          let janelaTeste = simularJanelaDeTrabalho(tDisponivel, tempoRealAlocado, mqId, diasTrabBase, horasDiariasBase);
+          if (janelaTeste.fim.getTime() < menorFimTime) {
+            menorFimTime = janelaTeste.fim.getTime();
+            janelaFinal = janelaTeste;
+            slotEscolhidoIndex = s;
+          }
+        }
+        controleMaquinasFim[mqId][slotEscolhidoIndex] = janelaFinal.fim;
+      } else {
+        let menorFimTime = Math.min(...controleMaquinasFim[mqId].map(d => d.getTime()));
+        let slotsDisponiveisJuntos = [];
+        for (let s = 0; s < numMaquinasUsadas; s++) {
+          if (controleMaquinasFim[mqId][s].getTime() <= menorFimTime + (30 * 60 * 1000)) slotsDisponiveisJuntos.push(s);
+        }
+        const divisorReal = slotsDisponiveisJuntos.length || 1;
+        tempoRealAlocado = tempoRealAlocado / divisorReal;
+        let tRealInicio = menorFimTime > tempoParaOcupacao.getTime() ? new Date(menorFimTime) : new Date(tempoParaOcupacao);
+        janelaFinal = simularJanelaDeTrabalho(tRealInicio, tempoRealAlocado, mqId, diasTrabBase, horasDiariasBase);
+        slotsDisponiveisJuntos.forEach(s => { controleMaquinasFim[mqId][s] = janelaFinal.fim; });
+        slotEscolhidoIndex = slotsDisponiveisJuntos[0] || 0;
+      }
+
+      // 🔴 Atualiza a memória da máquina para o próximo lote do loop!
+      ultimaAtividadeMaquina[mqId] = janelaFinal.fim;
+
+      let dadosTooltip = {};
+      if (tarefa.dados_calculo) {
+        try {
+          const js = typeof tarefa.dados_calculo === 'string' ? JSON.parse(tarefa.dados_calculo) : tarefa.dados_calculo;
+          dadosTooltip = { tiragem: js.config?.tiragem || js.tiragem || 'N/A', formato: js.config?.formatoFechado || 'N/A' };
+        } catch(e) {}
+      }
+
+      const novaResolvida = {
+        id: String(tarefa.id),
+        sku_alvo: String(tarefa.sku_alvo),
+        filtro_producao: String(tarefa.filtro_producao || 'S/ Lote'),
+        // Etiqueta visual para você saber quando o setup foi engolido na esteira!
+        nome_etapa: setupFoiDescontado ? `${String(tarefa.nome_etapa)} 🔥 (-Setup)` : String(tarefa.nome_etapa),
+        maquina_id: String(mqId),
+        tempo_estimado_horas: Number(tarefa.tempo_estimado_horas) || 0,
+        data_inicio: formataAbsoluto(janelaFinal.inicio),
+        data_fim: formataAbsoluto(janelaFinal.fim),
+        id_dependencia: tarefa.id_dependencia ? String(tarefa.id_dependencia) : null,
+        status_tarefa: String(tarefa.status_tarefa || 'Pendente'),
+        dados_tooltip: dadosTooltip,
+        
+        tempo_producao_efetivo: tempoRealAlocado,
+        tempo_indisponivel_regra: janelaFinal.horasIndisponiveisRegra,
+        sub_linha: slotEscolhidoIndex,
+        _isPUR: tarefa._isPUR,
+        _isAlc: tarefa._isAlc
+      };
+
+      tarefasResolvidas.push(novaResolvida);
+      resolvidasMap.set(tarefa._idUp, novaResolvida);
+      if (!resolvidasPorSku.has(tarefa._skuUp)) resolvidasPorSku.set(tarefa._skuUp, []);
+      resolvidasPorSku.get(tarefa._skuUp).push(novaResolvida);
+
+      indefinitasById.delete(tarefa._idUp);
+      const list = indefinitasPorSku.get(tarefa._skuUp);
+      if (list) {
+          const filtered = list.filter(i => i.id !== tarefa.id);
+          if (filtered.length > 0) indefinitasPorSku.set(tarefa._skuUp, filtered);
+          else indefinitasPorSku.delete(tarefa._skuUp);
+      }
+      indefinitas = indefinitas.filter(item => item.id !== tarefa.id);
+    }
+
+    return new Response(JSON.stringify(tarefasResolvidas), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+    });
+
+  } catch (error) {
+    return NextResponse.json({ message: error.message }, { status: 500 });
+  }
+}

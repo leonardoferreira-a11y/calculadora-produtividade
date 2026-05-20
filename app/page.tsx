@@ -1,65 +1,101 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+
+export default function LoginCalculArco() {
+  const [email, setEmail] = useState('');
+  const [senha, setSenha] = useState('');
+  const [erro, setErro] = useState('');
+  const router = useRouter();
+
+  const handleLogin = async (e: any) => {
+    e.preventDefault();
+    setErro('');
+
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, senha })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        localStorage.setItem('usuarioNome', data.usuario.nome);
+        localStorage.setItem('usuarioNivel', data.usuario.nivel_permissao);
+        localStorage.setItem('usuarioEmpresa', data.usuario.empresa);
+        
+        router.push('/dashboard'); 
+      } else {
+        setErro(data.message);
+      }
+    } catch (error) {
+      setErro('Erro de conexão com o servidor.');
+    }
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 px-4">
+      
+      {/* Background decorativo - Azul da Arco bem suave no topo */}
+      <div className="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-[#3b82f6]/10 to-transparent z-0"></div>
+
+      {/* Cartão do formulário - Agora branco com sombra suave */}
+      <div className="bg-white p-10 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 relative z-10">
+        
+        <div className="text-center mb-8">
+          {/* Título usando a cor escura do texto do logo da Arco */}
+          <h1 className="text-3xl font-black text-[#15192b] tracking-tight">
+            Bem Vindo a <span className="text-[#3b82f6]">CalculArco</span>
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+          <p className="text-sm text-slate-500 mt-2 font-medium">Gestão de Produtividade Gráfica</p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+        
+        {erro && (
+          // Caixa de erro - Tons de vermelho claro (Light Mode)
+          <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg mb-6 text-sm text-center font-medium">
+            {erro}
+          </div>
+        )}
+
+        <form onSubmit={handleLogin} className="flex flex-col gap-5">
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-2">E-mail corporativo</label>
+            <input 
+              type="email" 
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              // Inputs cinza claro que ficam brancos ao clicar
+              className="w-full bg-slate-50 border border-slate-300 rounded-lg px-4 py-3 text-slate-900 outline-none focus:bg-white focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/20 transition-all"
+              placeholder="seu@email.com"
+              required
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+          </div>
+          
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-2">Senha de acesso</label>
+            <input 
+              type="password" 
+              value={senha}
+              onChange={(e) => setSenha(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-300 rounded-lg px-4 py-3 text-slate-900 outline-none focus:bg-white focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/20 transition-all"
+              placeholder="••••••••"
+              required
+            />
+          </div>
+
+          <button 
+            type="submit" 
+            // Botão principal mantendo a identidade visual
+            className="w-full bg-[#3b82f6] text-white font-black text-lg py-3 mt-4 rounded-lg hover:bg-[#2563eb] transition-colors shadow-lg shadow-blue-500/30"
           >
-            Documentation
-          </a>
-        </div>
-      </main>
+            Acessar Sistema
+          </button>
+        </form>
+
+      </div>
     </div>
   );
 }
