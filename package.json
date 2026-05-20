@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@vercel/next": "4.17.2",
     "next": "16.2.6",
     "papaparse": "^5.5.3",
     "pg": "^8.20.0",
