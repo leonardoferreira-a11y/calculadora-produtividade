@@ -14,7 +14,7 @@ const timeToDecimal = (timeStr) => {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { grafica, simuladores = {} } = body;
+    const { grafica, simuladores = {}, prioridades = [], lotesVisiveis = [] } = body;
 
     if (!grafica) return NextResponse.json({ message: "Gráfica é obrigatória." }, { status: 400 });
 
@@ -99,6 +99,20 @@ export async function POST(request) {
             )
         };
     });
+
+    // MODO FLUIDO: filter to only visible lotes so the engine fills the gaps
+    if (lotesVisiveis.length > 0) {
+      const visiveisUp = new Set(lotesVisiveis.map(l => UPPER_CASE(l)));
+      indefinitas = indefinitas.filter(t => visiveisUp.has(UPPER_CASE(t.filtro_producao)));
+    }
+
+    // FILA VIP: build priority map — index 0 = highest priority
+    const prioridadeMap = new Map();
+    prioridades.forEach((lote, idx) => prioridadeMap.set(UPPER_CASE(lote), idx));
+    const getPrioridade = (filtro) => {
+      const p = prioridadeMap.get(UPPER_CASE(filtro));
+      return p !== undefined ? p : 99999;
+    };
 
     indefinitas.forEach(t => {
       if (!indefinitasPorSku.has(t._skuUp)) indefinitasPorSku.set(t._skuUp, []);
@@ -287,7 +301,12 @@ export async function POST(request) {
       }
       if (candidatosAptos.length === 0) break;
       
-      candidatosAptos.sort((a, b) => a.trt.getTime() - b.trt.getTime());
+      candidatosAptos.sort((a, b) => {
+        const pA = getPrioridade(a.tarefa.filtro_producao);
+        const pB = getPrioridade(b.tarefa.filtro_producao);
+        if (pA !== pB) return pA - pB;
+        return a.trt.getTime() - b.trt.getTime();
+      });
 
       const { tarefa, trt } = candidatosAptos[0];
       let mqId = String(tarefa.maquina_id || '').trim();
