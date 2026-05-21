@@ -13,7 +13,11 @@ export default function GanttIndustrial() {
   const [mapaCoresLotes, setMapaCoresLotes] = useState<Record<string, string>>({});
   
   const [visao, setVisao] = useState<VisaoGantt>('DIAS');
-  const [lotesAtivos, setLotesAtivos] = useState<string[]>([]);
+  const [draftPrioridades, setDraftPrioridades] = useState<string[]>([]);
+  const [draftLotesOcultos, setDraftLotesOcultos] = useState<Set<string>>(new Set());
+  const [draftOtimizarLacunas, setDraftOtimizarLacunas] = useState(false);
+  const [appliedLotesOcultos, setAppliedLotesOcultos] = useState<Set<string>>(new Set());
+  const [dragFromIdx, setDragFromIdx] = useState<number | null>(null);
   const [showFiltroLote, setShowFiltroLote] = useState(false);
   const [zoomPixelsPorDia, setZoomPixelsPorDia] = useState(140); 
   const [skuDestacado, setSkuDestacado] = useState<string | null>(null);
@@ -39,8 +43,6 @@ export default function GanttIndustrial() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('');
   const [isDirty, setIsDirty] = useState(false);
-  const [otimizarLacunas, setOtimizarLacunas] = useState(false);
-  const [prioridadeLotes, setPrioridadeLotes] = useState<string[]>([]);
   const [loteFocado, setLoteFocado] = useState<string | null>(null);
 
   const setoresFixos = ['Impressão', 'Beneficiamento', 'Dobra', 'Corte e Vinco', 'Alceadeira', 'Acabamentos Finais', 'Formação de Kit'];
@@ -72,7 +74,7 @@ export default function GanttIndustrial() {
     return 'Acabamentos Finais'; 
   };
 
-  const abrirGanttDaGrafica = async (graficaAlvo: string, simParams = simuladores, lotesParaAgendar: string[] = []) => {
+  const abrirGanttDaGrafica = async (graficaAlvo: string, simParams = simuladores, lotesParaAgendar: string[] = [], prioridades: string[] = []) => {
     if (isLoading) return;
     setIsLoading(true);
     setGraficaSelecionada(graficaAlvo);
@@ -91,7 +93,7 @@ export default function GanttIndustrial() {
       listaMaquinasFinal.push({ id: 'ESPIRALAR_MANUAL_UNIFIED', modelo: 'Linha Unificada de Espiralação Manual', tipo: 'Acabamentos Finais', dias_trabalho: espiraisFisicas[0]?.dias_trabalho || 5, horas_diarias: espiraisFisicas[0]?.horas_diarias || 24, maquinas: limiteFinalEspiral, pessoas: limiteFinalEspiral, grafica: graficaAlvo });
 
       setLoadingMsg('Roteando e calculando milhares de tarefas...');
-      const resTar = await fetch(`/api/producao/gantt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grafica: graficaAlvo, simuladores: simParams, prioridades: prioridadeLotes, lotesVisiveis: lotesParaAgendar }) });
+      const resTar = await fetch(`/api/producao/gantt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grafica: graficaAlvo, simuladores: simParams, prioridades, lotesVisiveis: lotesParaAgendar }) });
       const ts = await resTar.json();
       const dadosValidos = Array.isArray(ts) ? ts : [];
 
@@ -113,11 +115,12 @@ export default function GanttIndustrial() {
 
       setMaquinas(listaMaquinasFinal);
       setTarefasGlobais(dadosValidos);
-      setLotesAtivos([]);
+      setDraftLotesOcultos(new Set());
+      setAppliedLotesOcultos(new Set());
       setIsDirty(false);
       // Sync priority list: keep existing order, add new lotes at the end
       const novosLotes = lotesUnicos as string[];
-      setPrioridadeLotes(prev => {
+      setDraftPrioridades(prev => {
         const vivos = prev.filter(l => novosLotes.includes(l));
         const adicionados = novosLotes.filter(l => !vivos.includes(l));
         return [...vivos, ...adicionados];
@@ -139,24 +142,30 @@ export default function GanttIndustrial() {
   };
 
   const handleRecalcularGantt = () => {
+    setAppliedLotesOcultos(new Set(draftLotesOcultos));
     setIsDirty(false);
-    const lotesVisiveis = otimizarLacunas && lotesAtivos.length > 0 ? lotesAtivos : [];
-    abrirGanttDaGrafica(graficaSelecionada, simuladores, lotesVisiveis);
+    const lotesVisiveis = draftOtimizarLacunas
+      ? draftPrioridades.filter(l => !draftLotesOcultos.has(l))
+      : [];
+    abrirGanttDaGrafica(graficaSelecionada, simuladores, lotesVisiveis, draftPrioridades);
   };
 
-  const moverLotePrioridade = (lote: string, dir: 'up' | 'down') => {
-    setPrioridadeLotes(prev => {
-      const idx = prev.indexOf(lote);
-      if (idx === -1) return prev;
-      if (dir === 'up' && idx === 0) return prev;
-      if (dir === 'down' && idx === prev.length - 1) return prev;
+  const handleDragStart = (idx: number) => setDragFromIdx(idx);
+
+  const handleDragOver = (e: React.DragEvent, idx: number) => {
+    e.preventDefault();
+    if (dragFromIdx === null || dragFromIdx === idx) return;
+    setDraftPrioridades(prev => {
       const next = [...prev];
-      const swap = dir === 'up' ? idx - 1 : idx + 1;
-      [next[idx], next[swap]] = [next[swap], next[idx]];
+      const [item] = next.splice(dragFromIdx, 1);
+      next.splice(idx, 0, item);
       return next;
     });
+    setDragFromIdx(idx);
     setIsDirty(true);
   };
+
+  const handleDragEnd = () => setDragFromIdx(null);
 
   const handleAplicarRegimeEmMassa = async () => {
     try {
@@ -181,18 +190,22 @@ export default function GanttIndustrial() {
 
   const tarefasFiltradas = useMemo(() => {
     return tarefasGlobais.filter(t => {
-      const matchLote = lotesAtivos.length === 0 || lotesAtivos.includes(t.filtro_producao);
+      const matchLote = !appliedLotesOcultos.has(t.filtro_producao);
       const matchSkuClick = !skuDestacado || t.sku_alvo === skuDestacado;
       const matchSkuText = !buscaSkuQuery || String(t.sku_alvo).toUpperCase().includes(buscaSkuQuery.toUpperCase());
       return matchLote && matchSkuClick && matchSkuText;
     });
-  }, [tarefasGlobais, lotesAtivos, skuDestacado, buscaSkuQuery]);
+  }, [tarefasGlobais, appliedLotesOcultos, skuDestacado, buscaSkuQuery]);
 
   const lotesExistentes = Array.from(new Set(tarefasGlobais.map(t => t.filtro_producao)));
 
   const toggleFiltroLote = (lote: string) => {
-    setLotesAtivos(prev => prev.includes(lote) ? prev.filter(l => l !== lote) : [...prev, lote]);
-    if (otimizarLacunas) setIsDirty(true);
+    setDraftLotesOcultos(prev => {
+      const next = new Set(prev);
+      if (next.has(lote)) next.delete(lote); else next.add(lote);
+      return next;
+    });
+    setIsDirty(true);
   };
 
   const Rulers = useMemo(() => {
@@ -397,7 +410,7 @@ export default function GanttIndustrial() {
               <div className="relative">
                 <button onClick={() => setShowFiltroLote(!showFiltroLote)} className={`border font-bold px-3 py-1.5 rounded text-xs flex items-center gap-2 cursor-pointer transition-all duration-200 active:scale-95 ${loteFocado ? 'bg-amber-500 border-amber-600 text-white' : 'bg-slate-700 border-slate-600 text-white hover:bg-slate-600'}`}>
                   <i className="fas fa-layer-group"></i>
-                  Prioridades {loteFocado ? `• ${String(loteFocado).substring(0, 8)}` : `(${lotesAtivos.length === 0 ? 'Todos' : lotesAtivos.length})`}
+                  Prioridades {loteFocado ? `• ${String(loteFocado).substring(0, 8)}` : `(${draftLotesOcultos.size === 0 ? 'Todos' : `${draftPrioridades.length - draftLotesOcultos.size} vis.`})`}
                 </button>
 
                 {showFiltroLote && (
@@ -415,37 +428,41 @@ export default function GanttIndustrial() {
                         <p className="text-[9px] text-slate-400 font-medium">Modo Fluido: preenche buracos ao recalcular</p>
                       </div>
                       <button
-                        onClick={() => { setOtimizarLacunas(v => !v); setIsDirty(true); }}
-                        className={`w-10 h-5 rounded-full transition-all duration-300 relative cursor-pointer ${otimizarLacunas ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                        onClick={() => { setDraftOtimizarLacunas(v => !v); setIsDirty(true); }}
+                        className={`w-10 h-5 rounded-full transition-all duration-300 relative cursor-pointer ${draftOtimizarLacunas ? 'bg-emerald-500' : 'bg-slate-300'}`}
                       >
-                        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all duration-300 ${otimizarLacunas ? 'left-5' : 'left-0.5'}`} />
+                        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all duration-300 ${draftOtimizarLacunas ? 'left-5' : 'left-0.5'}`} />
                       </button>
                     </div>
 
                     {/* Actions */}
                     <div className="px-4 py-2 border-b flex items-center justify-between">
-                      <span className="text-[10px] font-black uppercase text-slate-400">Lotes — P1 é mais prioritário</span>
+                      <span className="text-[10px] font-black uppercase text-slate-400">Arraste para reordenar — P1 = maior prioridade</span>
                       <div className="flex gap-2">
-                        <button onClick={() => { setLotesAtivos([]); if (otimizarLacunas) setIsDirty(true); }} className="text-[10px] text-violet-600 font-bold hover:underline cursor-pointer">Todos</button>
-                        <button onClick={() => { setLotesAtivos(prioridadeLotes); if (otimizarLacunas) setIsDirty(true); }} className="text-[10px] text-slate-500 font-bold hover:underline cursor-pointer">Nenhum</button>
+                        <button onClick={() => { setDraftLotesOcultos(new Set()); setIsDirty(true); }} className="text-[10px] text-violet-600 font-bold hover:underline cursor-pointer">Todos</button>
+                        <button onClick={() => { setDraftLotesOcultos(new Set(draftPrioridades)); setIsDirty(true); }} className="text-[10px] text-slate-500 font-bold hover:underline cursor-pointer">Nenhum</button>
                         {loteFocado && <button onClick={() => setLoteFocado(null)} className="text-[10px] text-amber-600 font-bold hover:underline cursor-pointer">✕ Foco</button>}
                       </div>
                     </div>
 
-                    {/* Priority list */}
+                    {/* Priority list — drag to reorder */}
                     <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
-                      {prioridadeLotes.map((lote, idx) => {
-                        const ativo = !lotesAtivos.includes(lote as string);
+                      {draftPrioridades.map((lote, idx) => {
+                        const ativo = !draftLotesOcultos.has(lote as string);
                         const isFocado = loteFocado === lote;
                         return (
-                          <div key={`pri-${idx}`} className={`flex items-center gap-2 px-3 py-2 transition-colors ${isFocado ? 'bg-amber-50 border-l-2 border-amber-400' : 'hover:bg-slate-50'} ${!ativo ? 'opacity-40' : ''}`}>
+                          <div
+                            key={`pri-${idx}`}
+                            draggable
+                            onDragStart={() => handleDragStart(idx)}
+                            onDragOver={(e) => handleDragOver(e, idx)}
+                            onDragEnd={handleDragEnd}
+                            className={`flex items-center gap-2 px-3 py-2 transition-colors cursor-grab active:cursor-grabbing select-none ${isFocado ? 'bg-amber-50 border-l-2 border-amber-400' : 'hover:bg-slate-50'} ${!ativo ? 'opacity-40' : ''} ${dragFromIdx === idx ? 'opacity-60 bg-violet-50' : ''}`}
+                          >
                             {/* Priority number */}
                             <span className="text-[10px] font-black text-slate-400 w-4 text-center">{idx + 1}</span>
-                            {/* Up/Down arrows */}
-                            <div className="flex flex-col gap-0.5">
-                              <button onClick={() => moverLotePrioridade(lote as string, 'up')} disabled={idx === 0} className="text-[8px] text-slate-400 hover:text-violet-600 disabled:opacity-20 cursor-pointer leading-none">▲</button>
-                              <button onClick={() => moverLotePrioridade(lote as string, 'down')} disabled={idx === prioridadeLotes.length - 1} className="text-[8px] text-slate-400 hover:text-violet-600 disabled:opacity-20 cursor-pointer leading-none">▼</button>
-                            </div>
+                            {/* Drag handle */}
+                            <span className="text-slate-300 hover:text-violet-400 text-xs" title="Arraste para reordenar">⠿</span>
                             {/* Color dot */}
                             <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${(mapaCoresLotes[lote as string] || 'bg-slate-400').split(' ')[0]}`}></span>
                             {/* Lote name — click to focus */}
