@@ -293,6 +293,31 @@ export async function POST(request) {
           prontoParaAgendar = false;
         }
 
+        // Parallel sync: Acabamento Final must wait for Beneficiamento (capa) + Corte e Vinco (inserts)
+        if (prontoParaAgendar && t._isAlc) {
+          const skuResolvidas = resolvidasPorSku.get(t._skuUp) || [];
+          const skuIndef = indefinitasPorSku.get(t._skuUp) || [];
+          const beneficPendente = skuIndef.some(r => {
+            const n = String(r.nome_etapa).toLowerCase();
+            return n.includes('benefic') || n.includes('laminac');
+          });
+          const corteVincoPendente = skuIndef.some(r => {
+            const n = String(r.nome_etapa).toLowerCase();
+            return n.includes('corte') || n.includes('vinco');
+          });
+          if (beneficPendente || corteVincoPendente) {
+            prontoParaAgendar = false;
+          } else {
+            for (const r of skuResolvidas) {
+              const n = String(r.nome_etapa).toLowerCase();
+              if (n.includes('benefic') || n.includes('laminac') || n.includes('corte') || n.includes('vinco')) {
+                const fim = new Date(r.data_fim);
+                if (fim > tempoProntidaoTecnica) tempoProntidaoTecnica = fim;
+              }
+            }
+          }
+        }
+
         if (prontoParaAgendar) candidatosAptos.push({ tarefa: t, trt: tempoProntidaoTecnica });
       }
 
@@ -301,11 +326,25 @@ export async function POST(request) {
       }
       if (candidatosAptos.length === 0) break;
       
+      const menorTrt = Math.min(...candidatosAptos.map(c => c.trt.getTime()));
+      const JANELA_MS = 2 * 60 * 60 * 1000;
       candidatosAptos.sort((a, b) => {
+        const aTrtMs = a.trt.getTime();
+        const bTrtMs = b.trt.getTime();
+        const aProximo = aTrtMs <= menorTrt + JANELA_MS;
+        const bProximo = bTrtMs <= menorTrt + JANELA_MS;
+        if (aProximo && bProximo) {
+          const pA = getPrioridade(a.tarefa.filtro_producao);
+          const pB = getPrioridade(b.tarefa.filtro_producao);
+          if (pA !== pB) return pA - pB;
+          return aTrtMs - bTrtMs;
+        }
+        if (aProximo && !bProximo) return -1;
+        if (!aProximo && bProximo) return 1;
+        if (aTrtMs !== bTrtMs) return aTrtMs - bTrtMs;
         const pA = getPrioridade(a.tarefa.filtro_producao);
         const pB = getPrioridade(b.tarefa.filtro_producao);
-        if (pA !== pB) return pA - pB;
-        return a.trt.getTime() - b.trt.getTime();
+        return pA - pB;
       });
 
       const { tarefa, trt } = candidatosAptos[0];
