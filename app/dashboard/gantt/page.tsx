@@ -39,6 +39,9 @@ export default function GanttIndustrial() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('');
   const [isDirty, setIsDirty] = useState(false);
+  const [otimizarLacunas, setOtimizarLacunas] = useState(false);
+  const [prioridadeLotes, setPrioridadeLotes] = useState<string[]>([]);
+  const [loteFocado, setLoteFocado] = useState<string | null>(null);
 
   const setoresFixos = ['Impressão', 'Beneficiamento', 'Dobra', 'Corte e Vinco', 'Alceadeira', 'Acabamentos Finais', 'Formação de Kit'];
   const PALETA_LOTES = ["bg-blue-500 border-blue-700", "bg-emerald-500 border-emerald-700", "bg-rose-500 border-rose-700", "bg-amber-500 border-amber-700", "bg-purple-500 border-purple-700", "bg-sky-500 border-sky-700", "bg-fuchsia-500 border-fuchsia-700", "bg-lime-500 border-lime-700", "bg-orange-500 border-orange-700"];
@@ -69,8 +72,8 @@ export default function GanttIndustrial() {
     return 'Acabamentos Finais'; 
   };
 
-  const abrirGanttDaGrafica = async (graficaAlvo: string, simParams = simuladores) => {
-    if (isLoading) return; 
+  const abrirGanttDaGrafica = async (graficaAlvo: string, simParams = simuladores, lotesParaAgendar: string[] = []) => {
+    if (isLoading) return;
     setIsLoading(true);
     setGraficaSelecionada(graficaAlvo);
     
@@ -88,7 +91,7 @@ export default function GanttIndustrial() {
       listaMaquinasFinal.push({ id: 'ESPIRALAR_MANUAL_UNIFIED', modelo: 'Linha Unificada de Espiralação Manual', tipo: 'Acabamentos Finais', dias_trabalho: espiraisFisicas[0]?.dias_trabalho || 5, horas_diarias: espiraisFisicas[0]?.horas_diarias || 24, maquinas: limiteFinalEspiral, pessoas: limiteFinalEspiral, grafica: graficaAlvo });
 
       setLoadingMsg('Roteando e calculando milhares de tarefas...');
-      const resTar = await fetch(`/api/producao/gantt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grafica: graficaAlvo, simuladores: simParams }) });
+      const resTar = await fetch(`/api/producao/gantt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grafica: graficaAlvo, simuladores: simParams, prioridades: prioridadeLotes, lotesVisiveis: lotesParaAgendar }) });
       const ts = await resTar.json();
       const dadosValidos = Array.isArray(ts) ? ts : [];
 
@@ -112,6 +115,13 @@ export default function GanttIndustrial() {
       setTarefasGlobais(dadosValidos);
       setLotesAtivos([]);
       setIsDirty(false);
+      // Sync priority list: keep existing order, add new lotes at the end
+      const novosLotes = lotesUnicos as string[];
+      setPrioridadeLotes(prev => {
+        const vivos = prev.filter(l => novosLotes.includes(l));
+        const adicionados = novosLotes.filter(l => !vivos.includes(l));
+        return [...vivos, ...adicionados];
+      });
       await carregarTravasDoBanco(graficaAlvo);
       setEtapa(2);
     } catch(e) {
@@ -130,7 +140,22 @@ export default function GanttIndustrial() {
 
   const handleRecalcularGantt = () => {
     setIsDirty(false);
-    abrirGanttDaGrafica(graficaSelecionada, simuladores);
+    const lotesVisiveis = otimizarLacunas && lotesAtivos.length > 0 ? lotesAtivos : [];
+    abrirGanttDaGrafica(graficaSelecionada, simuladores, lotesVisiveis);
+  };
+
+  const moverLotePrioridade = (lote: string, dir: 'up' | 'down') => {
+    setPrioridadeLotes(prev => {
+      const idx = prev.indexOf(lote);
+      if (idx === -1) return prev;
+      if (dir === 'up' && idx === 0) return prev;
+      if (dir === 'down' && idx === prev.length - 1) return prev;
+      const next = [...prev];
+      const swap = dir === 'up' ? idx - 1 : idx + 1;
+      [next[idx], next[swap]] = [next[swap], next[idx]];
+      return next;
+    });
+    setIsDirty(true);
   };
 
   const handleAplicarRegimeEmMassa = async () => {
@@ -167,6 +192,7 @@ export default function GanttIndustrial() {
 
   const toggleFiltroLote = (lote: string) => {
     setLotesAtivos(prev => prev.includes(lote) ? prev.filter(l => l !== lote) : [...prev, lote]);
+    if (otimizarLacunas) setIsDirty(true);
   };
 
   const Rulers = useMemo(() => {
@@ -369,24 +395,78 @@ export default function GanttIndustrial() {
               </div>
 
               <div className="relative">
-                <button onClick={() => setShowFiltroLote(!showFiltroLote)} className="bg-slate-700 border border-slate-600 text-white font-bold px-3 py-1.5 rounded text-xs flex items-center gap-2 cursor-pointer hover:bg-slate-600 transition-all duration-200 active:scale-95"><i className="fas fa-filter"></i> Lotes ({lotesAtivos.length === 0 ? 'Todos' : lotesAtivos.length})</button>
+                <button onClick={() => setShowFiltroLote(!showFiltroLote)} className={`border font-bold px-3 py-1.5 rounded text-xs flex items-center gap-2 cursor-pointer transition-all duration-200 active:scale-95 ${loteFocado ? 'bg-amber-500 border-amber-600 text-white' : 'bg-slate-700 border-slate-600 text-white hover:bg-slate-600'}`}>
+                  <i className="fas fa-layer-group"></i>
+                  Prioridades {loteFocado ? `• ${String(loteFocado).substring(0, 8)}` : `(${lotesAtivos.length === 0 ? 'Todos' : lotesAtivos.length})`}
+                </button>
+
                 {showFiltroLote && (
-                  <div className="absolute top-full right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border p-3 z-[9000]">
-                    <div className="flex justify-between items-center mb-2 border-b pb-1">
-                      <span className="text-[10px] font-black uppercase text-slate-500">Lotes</span>
+                  <div className="absolute top-full right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 z-[9000] overflow-hidden">
+                    {/* Header */}
+                    <div className="bg-slate-800 text-white px-4 py-2.5 flex justify-between items-center">
+                      <span className="text-[11px] font-black uppercase tracking-wider flex items-center gap-2"><i className="fas fa-sort-amount-down text-violet-400"></i> Painel de Prioridades</span>
+                      <button onClick={() => setShowFiltroLote(false)} className="text-slate-400 hover:text-white text-sm font-bold">&times;</button>
+                    </div>
+
+                    {/* Otimizar Lacunas toggle */}
+                    <div className="px-4 py-2.5 bg-slate-50 border-b flex items-center justify-between">
+                      <div>
+                        <p className="text-[11px] font-black text-slate-700 uppercase">Otimizar Lacunas</p>
+                        <p className="text-[9px] text-slate-400 font-medium">Modo Fluido: preenche buracos ao recalcular</p>
+                      </div>
+                      <button
+                        onClick={() => { setOtimizarLacunas(v => !v); setIsDirty(true); }}
+                        className={`w-10 h-5 rounded-full transition-all duration-300 relative cursor-pointer ${otimizarLacunas ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                      >
+                        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all duration-300 ${otimizarLacunas ? 'left-5' : 'left-0.5'}`} />
+                      </button>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="px-4 py-2 border-b flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase text-slate-400">Lotes — P1 é mais prioritário</span>
                       <div className="flex gap-2">
-                        <button onClick={() => setLotesAtivos(lotesExistentes as string[])} className="text-[10px] text-emerald-600 font-bold hover:underline cursor-pointer">Todos</button>
-                        <button onClick={() => setLotesAtivos([])} className="text-[10px] text-violet-600 font-bold hover:underline cursor-pointer">Limpar</button>
+                        <button onClick={() => { setLotesAtivos([]); if (otimizarLacunas) setIsDirty(true); }} className="text-[10px] text-violet-600 font-bold hover:underline cursor-pointer">Todos</button>
+                        <button onClick={() => { setLotesAtivos(prioridadeLotes); if (otimizarLacunas) setIsDirty(true); }} className="text-[10px] text-slate-500 font-bold hover:underline cursor-pointer">Nenhum</button>
+                        {loteFocado && <button onClick={() => setLoteFocado(null)} className="text-[10px] text-amber-600 font-bold hover:underline cursor-pointer">✕ Foco</button>}
                       </div>
                     </div>
-                    <div className="max-h-64 overflow-y-auto space-y-1">
-                      {lotesExistentes.map((lote, idx) => (
-                        <label key={`lote-filter-${idx}`} className="flex items-center gap-2 text-xs font-bold text-slate-700 p-1 hover:bg-slate-50 rounded cursor-pointer">
-                          <input type="checkbox" className="w-4 h-4 accent-violet-600" checked={lotesAtivos.includes(lote as string)} onChange={() => toggleFiltroLote(lote as string)} />
-                          <span className={`w-3 h-3 rounded-full ${mapaCoresLotes[lote as string]}`}></span>
-                          {String(lote || 'SEM LOTE')}
-                        </label>
-                      ))}
+
+                    {/* Priority list */}
+                    <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
+                      {prioridadeLotes.map((lote, idx) => {
+                        const ativo = !lotesAtivos.includes(lote as string);
+                        const isFocado = loteFocado === lote;
+                        return (
+                          <div key={`pri-${idx}`} className={`flex items-center gap-2 px-3 py-2 transition-colors ${isFocado ? 'bg-amber-50 border-l-2 border-amber-400' : 'hover:bg-slate-50'} ${!ativo ? 'opacity-40' : ''}`}>
+                            {/* Priority number */}
+                            <span className="text-[10px] font-black text-slate-400 w-4 text-center">{idx + 1}</span>
+                            {/* Up/Down arrows */}
+                            <div className="flex flex-col gap-0.5">
+                              <button onClick={() => moverLotePrioridade(lote as string, 'up')} disabled={idx === 0} className="text-[8px] text-slate-400 hover:text-violet-600 disabled:opacity-20 cursor-pointer leading-none">▲</button>
+                              <button onClick={() => moverLotePrioridade(lote as string, 'down')} disabled={idx === prioridadeLotes.length - 1} className="text-[8px] text-slate-400 hover:text-violet-600 disabled:opacity-20 cursor-pointer leading-none">▼</button>
+                            </div>
+                            {/* Color dot */}
+                            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${(mapaCoresLotes[lote as string] || 'bg-slate-400').split(' ')[0]}`}></span>
+                            {/* Lote name — click to focus */}
+                            <button
+                              onClick={() => setLoteFocado(isFocado ? null : lote as string)}
+                              className={`flex-1 text-left text-xs font-bold truncate cursor-pointer transition-colors ${isFocado ? 'text-amber-700' : 'text-slate-700 hover:text-violet-700'}`}
+                              title={`Clique para focar em: ${lote}`}
+                            >
+                              {String(lote || 'SEM LOTE')}
+                              {isFocado && <span className="ml-1 text-amber-500 text-[9px]">★ FOCO</span>}
+                            </button>
+                            {/* Visibility checkbox */}
+                            <input
+                              type="checkbox"
+                              className="w-3.5 h-3.5 accent-violet-600 cursor-pointer flex-shrink-0"
+                              checked={ativo}
+                              onChange={() => toggleFiltroLote(lote as string)}
+                            />
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -511,7 +591,11 @@ export default function GanttIndustrial() {
                                 const dTop = 6 + (tarefa.sub_linha || 0) * 36; 
 
                                 const isEsteSkuClicado = skuDestacado === tarefa.sku_alvo;
-                                const opacityClass = (skuDestacado && !isEsteSkuClicado) ? "opacity-10 scale-[0.98]" : "transition-all duration-150 shadow-md hover:z-50 hover:scale-105";
+                                const isDimmedBySku = skuDestacado && !isEsteSkuClicado;
+                                const isDimmedByFoco = loteFocado && tarefa.filtro_producao !== loteFocado;
+                                const opacityClass = (isDimmedBySku || isDimmedByFoco)
+                                  ? "opacity-20 grayscale scale-[0.98] pointer-events-none"
+                                  : "transition-all duration-150 shadow-md hover:z-50 hover:scale-105";
 
                                 const dtInicio = new Date(tarefa.data_inicio).toLocaleString('pt-BR', { timeZone: 'UTC', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
                                 const dtFim = new Date(tarefa.data_fim).toLocaleString('pt-BR', { timeZone: 'UTC', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
