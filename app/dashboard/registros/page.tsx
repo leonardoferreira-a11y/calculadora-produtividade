@@ -764,6 +764,22 @@ export default function RegistrosTempo() {
     setProgressoRobo({ atual: 0, total: skusAlvo.length, status: 'processando', tipo: 'Calculando' });
     cancelarRoboRef.current = false;
     let sucessoCount = 0;
+    // Load-balancing counter: distributes assignments across equivalent machines
+    const contadorMaquinas: Record<string, number> = {};
+    const getMaquinaComMenorFila = (tipoBusca: string, subtipoBusca?: string) => {
+      let candidatas = maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes(String(tipoBusca).toLowerCase()));
+      if (subtipoBusca) {
+        candidatas = maquinasCargadas.filter(m =>
+          String(m.tipo || '').toLowerCase().includes(String(tipoBusca).toLowerCase()) ||
+          String(m.tipo || '').toLowerCase().includes(String(subtipoBusca).toLowerCase())
+        );
+      }
+      if (candidatas.length === 0) return null;
+      candidatas.sort((a, b) => (contadorMaquinas[a.id] || 0) - (contadorMaquinas[b.id] || 0) || Number(b.produtividade_unit || 0) - Number(a.produtividade_unit || 0));
+      const escolhida = candidatas[0];
+      contadorMaquinas[escolhida.id] = (contadorMaquinas[escolhida.id] || 0) + 1;
+      return escolhida;
+    };
 
     for (let i = 0; i < skusAlvo.length; i++) {
       if (cancelarRoboRef.current) {
@@ -802,7 +818,7 @@ export default function RegistrosTempo() {
           mqAlc = getMaquinaAlceamentoIdeal(acab, totalCadernos);
       }
 
-      const mqGra = robo.grampo ? maquinasCargadas.find(m => String(m.id) === robo.grampo) : getMaquinaMaisRapida('Grampo', 'Canoa');
+      const mqGra = robo.grampo ? maquinasCargadas.find(m => String(m.id) === robo.grampo) : getMaquinaComMenorFila('Grampo', 'Canoa');
       const mqFur = robo.furacao ? maquinasCargadas.find(m => String(m.id) === robo.furacao) : getMaquinaMaisRapida('Furação', 'Espiral');
       
       const lombadaNum = Number(String(item.lombada || '0').replace(',', '.'));
@@ -853,6 +869,7 @@ export default function RegistrosTempo() {
           corte_vinco: (resCort && mqCorte) ? { maquina_id: mqCorte.id, resultado: resCort } : undefined,
           dobra: mqDob ? { maquina_id: mqDob.id, resultado: resDob } : null,
           alceamento: resAlc && mqAlc ? { maquina_id: mqAlc.id, resultado: resAlc } : undefined,
+          cola: (resAlc && mqAlc && (String(mqAlc.tipo || '').toUpperCase().includes('COLA') || String(mqAlc.tipo || '').toUpperCase().includes('PUR'))) ? { maquina_id: mqAlc.id, resultado: resAlc } : undefined,
           grampo: resGra && mqGra ? { maquina_id: mqGra.id, resultado: resGra } : undefined,
           espiral: resEsp && mqEspFinal ? { maquina_furacao_id: mqFur?.id, maquina_espiral_id: mqEspFinal.id, resultado: resEsp } : undefined
         }

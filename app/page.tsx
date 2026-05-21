@@ -44,6 +44,14 @@ export default function LoginCalculArco() {
       <div className="bg-white p-10 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 relative z-10">
 
         <div className="text-center mb-8">
+          <div className="flex justify-center mb-4">
+            <img
+              src="/logo.png"
+              alt="Logo"
+              className="h-16 w-auto object-contain"
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+            />
+          </div>
           <h1 className="text-3xl font-black text-[#15192b] tracking-tight">
             Bem Vindo a <span className="text-[#3b82f6]">CalculArco</span>
           </h1>
