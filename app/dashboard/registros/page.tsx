@@ -392,6 +392,9 @@ export default function RegistrosTempo() {
     const setupUnitario = timeToDecimal(maquina.setup || '00:00');
     const qtdCores = Number(maquina.maq_cores) || 4;
     const passadas = qtdCores <= 4 ? 2 : 1;
+    const _tipo = String(maquina?.tipo || '').toUpperCase();
+    const _modelo = String(maquina?.modelo || '').toUpperCase();
+    const isDigital = _tipo.includes('DIGITAL') || _modelo.includes('DIGITAL');
 
     const linhas = [];
     const cadernosInteiros = Math.floor(paginasOS / capacidadeMax);
@@ -399,7 +402,7 @@ export default function RegistrosTempo() {
 
     if (cadernosInteiros > 0) {
       totalGirosInteiros = cadernosInteiros * tiragemProduzida * passadas;
-      setupInteirosDecimal = setupUnitario * cadernosInteiros * passadas;
+      setupInteirosDecimal = isDigital ? setupUnitario : setupUnitario * cadernosInteiros * passadas;
       rodagemInteirosDecimal = totalGirosInteiros / velocidade;
       linhas.push({ tipo: `CADERNO ${capacidadeMax} PGS (INTEIRO)`, qtd: cadernosInteiros, giros: totalGirosInteiros, setup: decimalToTime(setupInteirosDecimal), rodagem: decimalToTime(rodagemInteirosDecimal), total: decimalToTime(setupInteirosDecimal + rodagemInteirosDecimal) });
     }
@@ -410,7 +413,7 @@ export default function RegistrosTempo() {
     if (paginasRestantes > 0) {
       poses = Math.floor(capacidadeMax / paginasRestantes) || 1;
       girosFracionado = Math.ceil(tiragemProduzida / poses) * passadas;
-      setupFracionadoDecimal = setupUnitario * 1 * passadas;
+      setupFracionadoDecimal = isDigital ? (cadernosInteiros > 0 ? 0 : setupUnitario) : setupUnitario * 1 * passadas;
       rodagemFracionadoDecimal = girosFracionado / velocidade;
       linhas.push({ tipo: `CADERNO ${paginasRestantes} PGS (FRAÇÃO ${poses}x UP)`, qtd: 1, giros: girosFracionado, setup: decimalToTime(setupFracionadoDecimal), rodagem: decimalToTime(rodagemFracionadoDecimal), total: decimalToTime(setupFracionadoDecimal + rodagemFracionadoDecimal) });
     }
