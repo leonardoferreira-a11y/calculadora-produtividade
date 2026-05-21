@@ -73,15 +73,15 @@ export default function DashboardFluxoGargalos() {
   const obterOrdemSetor = (nomeEtapa: string, tipoMaq: string): number => {
     const t = String(tipoMaq || '').toLowerCase(); const e = String(nomeEtapa || '').toLowerCase();
     if (t.includes('impress') || e.includes('impress')) return 10;
-    if (t.includes('dobra') || e.includes('dobra')) return 20;
-    if (t.includes('laminac') || t.includes('benefic') || e.includes('benefic')) return 30;
-    if (t.includes('empast') || e.includes('empast')) return 35; // 🔴 EMPASTAMENTO ENTRA AQUI
-    if (t.includes('corte') || t.includes('vinco') || e.includes('corte')) return 40;
+    if (t.includes('laminac') || t.includes('benefic') || e.includes('benefic')) return 20;
+    if (t.includes('dobra') || e.includes('dobra')) return 25;
+    if (t.includes('empast') || e.includes('empast')) return 30;
+    if (t.includes('corte') || t.includes('vinco') || e.includes('corte')) return 35;
     if (t.includes('alceade') && !t.includes('cola') && !e.includes('cola')) return 50;
-    if (e.includes('fura') || t.includes('fura')) return 60; 
-    if (e.includes('espiral') || t.includes('espiral')) return 70; 
+    if (e.includes('fura') || t.includes('fura')) return 60;
+    if (e.includes('espiral') || t.includes('espiral')) return 70;
     if (t.includes('shrink') || t.includes('encaixot') || e.includes('shrink') || e.includes('box') || t.includes('kit') || e.includes('kit')) return 90;
-    return 80; 
+    return 80;
   };
 
   const obterNomeFluxo = (nomeEtapa: string, tipoMaq: string): string => {

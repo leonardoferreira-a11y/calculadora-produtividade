@@ -423,6 +423,104 @@ export async function POST(request) {
       indefinitas = indefinitas.filter(item => item.id !== tarefa.id);
     }
 
+    // -----------------------------------------------------------------------
+    // KIT MRP: Schedule encaixotamento/shrink AFTER all dependent SKUs finish
+    // -----------------------------------------------------------------------
+    try {
+      const resKits = await pool.query(
+        `SELECT kc.id_codigo_kit, kc.dados_calculo,
+                pk.id_codigo_sku_capa, pk.filtro_producao AS kit_filtro,
+                pk.grafica AS kit_grafica
+         FROM kit_calculos kc
+         JOIN prod_kits pk
+           ON UPPER(TRIM(kc.id_codigo_kit)) = UPPER(TRIM(pk.id_codigo_kit))
+          AND UPPER(TRIM(kc.filtro_producao)) = UPPER(TRIM(pk.filtro_producao))
+          AND UPPER(TRIM(kc.grafica)) = UPPER(TRIM(pk.grafica))
+         WHERE UPPER(TRIM(kc.grafica)) = UPPER(TRIM($1))
+           AND kc.dados_calculo IS NOT NULL`,
+        [grafica]
+      );
+
+      // Group: kit_id -> { dados_calculo, filtro, skus[] }
+      const kitsMap = new Map();
+      for (const row of resKits.rows) {
+        const key = UPPER_CASE(row.id_codigo_kit) + '|' + UPPER_CASE(row.kit_filtro);
+        if (!kitsMap.has(key)) {
+          let dc = {};
+          try { dc = typeof row.dados_calculo === 'string' ? JSON.parse(row.dados_calculo) : (row.dados_calculo || {}); } catch(e) {}
+          kitsMap.set(key, { id: row.id_codigo_kit, filtro: row.kit_filtro, grafica: row.kit_grafica, dados_calculo: dc, skus: [] });
+        }
+        if (row.id_codigo_sku_capa) kitsMap.get(key).skus.push(UPPER_CASE(row.id_codigo_sku_capa));
+      }
+
+      // Convert "HH:MM" string to decimal hours
+      const horasDeString = (str) => {
+        if (!str || !String(str).includes(':')) return 0;
+        const [h, m] = String(str).split(':');
+        return parseInt(h) + (parseInt(m) / 60);
+      };
+
+      for (const [, kit] of kitsMap) {
+        // Find the latest finish time among all resolved tasks for this kit's SKUs
+        let maxFim = null;
+        for (const skuCapa of kit.skus) {
+          const tarefasDoSku = resolvidasPorSku.get(skuCapa) || [];
+          for (const t of tarefasDoSku) {
+            const fim = new Date(t.data_fim);
+            if (!maxFim || fim > maxFim) maxFim = fim;
+          }
+        }
+        if (!maxFim) continue; // no resolved tasks for this kit's SKUs yet
+
+        const dc = kit.dados_calculo;
+        const operacoes = [];
+
+        if (dc.encaixotamento?.maquina_id && dc.encaixotamento?.resultado) {
+          const horas = horasDeString(dc.encaixotamento.resultado.totais?.total);
+          if (horas > 0) operacoes.push({ tipo: 'Encaixotamento', mqId: String(dc.encaixotamento.maquina_id), horas });
+        }
+        if (dc.shrink?.maquina_id && dc.shrink?.resultado) {
+          const horas = horasDeString(dc.shrink.resultado.totais?.total);
+          if (horas > 0) operacoes.push({ tipo: 'Shrink', mqId: String(dc.shrink.maquina_id), horas });
+        }
+
+        let inicioKit = new Date(maxFim);
+        for (const op of operacoes) {
+          // Respect any existing queue on the kit machine
+          const filaAtual = controleMaquinasFim[op.mqId];
+          let tAtual = inicioKit;
+          if (filaAtual) {
+            const menorFim = new Date(Math.min(...filaAtual.map(d => d.getTime())));
+            if (menorFim > tAtual) tAtual = menorFim;
+          }
+          const janela = simularJanelaDeTrabalho(tAtual, op.horas, op.mqId, 5, 24);
+          if (!controleMaquinasFim[op.mqId]) controleMaquinasFim[op.mqId] = [janela.fim];
+          else controleMaquinasFim[op.mqId][0] = janela.fim;
+
+          tarefasResolvidas.push({
+            id: `kit-${UPPER_CASE(kit.id)}-${op.tipo}`,
+            sku_alvo: kit.id,
+            filtro_producao: String(kit.filtro || 'Kit'),
+            nome_etapa: op.tipo,
+            maquina_id: op.mqId,
+            maq_tipo: op.tipo,
+            maq_modelo: op.tipo,
+            tempo_estimado_horas: op.horas,
+            data_inicio: formataAbsoluto(janela.inicio),
+            data_fim: formataAbsoluto(janela.fim),
+            id_dependencia: null,
+            status_tarefa: 'Pendente',
+            dados_tooltip: { tiragem: 'Kit', paginacao: 'Kit', acabamento: op.tipo },
+            tempo_producao_efetivo: op.horas,
+            tempo_indisponivel_regra: janela.horasIndisponiveisRegra,
+            sub_linha: 0,
+          });
+        }
+      }
+    } catch(kitErr) {
+      console.error('Kit MRP error:', kitErr.message);
+    }
+
     return new Response(JSON.stringify(tarefasResolvidas), {
         status: 200,
         headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }

@@ -38,6 +38,7 @@ export default function GanttIndustrial() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('');
+  const [isDirty, setIsDirty] = useState(false);
 
   const setoresFixos = ['Impressão', 'Beneficiamento', 'Dobra', 'Corte e Vinco', 'Alceadeira', 'Acabamentos Finais', 'Formação de Kit'];
   const PALETA_LOTES = ["bg-blue-500 border-blue-700", "bg-emerald-500 border-emerald-700", "bg-rose-500 border-rose-700", "bg-amber-500 border-amber-700", "bg-purple-500 border-purple-700", "bg-sky-500 border-sky-700", "bg-fuchsia-500 border-fuchsia-700", "bg-lime-500 border-lime-700", "bg-orange-500 border-orange-700"];
@@ -109,9 +110,10 @@ export default function GanttIndustrial() {
 
       setMaquinas(listaMaquinasFinal);
       setTarefasGlobais(dadosValidos);
-      setLotesAtivos([]); 
+      setLotesAtivos([]);
+      setIsDirty(false);
       await carregarTravasDoBanco(graficaAlvo);
-      setEtapa(2); 
+      setEtapa(2);
     } catch(e) {
       alert("Falha na conexão. Recarregue a página e tente novamente.");
     } finally {
@@ -123,7 +125,12 @@ export default function GanttIndustrial() {
     const novosSimuladores = { ...simuladores, [maquinaId]: { usadas: qtdUsadas, modo } };
     setSimuladores(novosSimuladores);
     localStorage.setItem('gantt_simulacao_estado', JSON.stringify(novosSimuladores));
-    abrirGanttDaGrafica(graficaSelecionada, novosSimuladores);
+    setIsDirty(true);
+  };
+
+  const handleRecalcularGantt = () => {
+    setIsDirty(false);
+    abrirGanttDaGrafica(graficaSelecionada, simuladores);
   };
 
   const handleAplicarRegimeEmMassa = async () => {
@@ -385,6 +392,11 @@ export default function GanttIndustrial() {
                 )}
               </div>
 
+              {isDirty && (
+                <button onClick={handleRecalcularGantt} className="bg-emerald-500 hover:bg-emerald-400 text-white font-black px-4 py-1.5 rounded text-xs shadow-lg animate-pulse flex items-center gap-2 cursor-pointer active:scale-95 transition-all">
+                  <i className="fas fa-sync-alt"></i> Simular / Recalcular
+                </button>
+              )}
               {skuDestacado && <button onClick={() => setSkuDestacado(null)} className="bg-amber-500 text-slate-900 font-bold px-2 py-1.5 rounded text-[10px] uppercase shadow">Limpar SKU</button>}
               <button onClick={() => setShowModalRelatorio(true)} className="bg-teal-600 hover:bg-teal-500 text-white font-bold px-3 py-1.5 rounded text-xs shadow-sm"><i className="fas fa-file-alt mr-1"></i> Prazos</button>
               <button onClick={() => setShowModalTravas(true)} className="bg-violet-600 hover:bg-violet-500 text-white font-bold px-3 py-1.5 rounded text-xs shadow-sm"><i className="fas fa-calendar-alt mr-1"></i> Calendário</button>
