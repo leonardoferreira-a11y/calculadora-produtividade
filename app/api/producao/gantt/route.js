@@ -104,9 +104,6 @@ export async function POST(request) {
     if (lotesVisiveis.length > 0) {
       const visiveisUp = new Set(lotesVisiveis.map(l => UPPER_CASE(l)));
       indefinitas = indefinitas.filter(t => visiveisUp.has(UPPER_CASE(t.filtro_producao)));
-      // Reset ideal_inicio to NOW so tasks schedule from current time instead of stale planned dates
-      const agora = new Date();
-      indefinitas = indefinitas.map(t => ({ ...t, ideal_inicio: agora }));
     }
 
     // FILA VIP: build priority map — index 0 = highest priority
