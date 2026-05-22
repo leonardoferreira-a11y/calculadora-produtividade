@@ -516,6 +516,40 @@ export default function CalculoKits() {
               </div>
             </header>
 
+            {/* BARRA DE FERRAMENTAS SUPERIOR */}
+            <div className="flex items-center gap-3 mb-5 p-3 bg-slate-50 border border-slate-200 rounded-lg shadow-sm">
+              <i className="fas fa-tools text-slate-400 text-sm"></i>
+              <select
+                value={kitAtual?.id_codigo_kit || ''}
+                onChange={(e) => {
+                  const kit = kits.find((k: any) => k.id_codigo_kit === e.target.value);
+                  if (kit) { setKitAtual(kit); setIdMaquinaEncaixotamento(kit.dados_calculo?.encaixotamento?.maquina_id || ''); setIdMaquinaShrink(kit.dados_calculo?.shrink?.maquina_id || ''); setEtapa(3); }
+                }}
+                className="border border-slate-300 rounded-md px-3 py-1.5 text-sm font-bold text-slate-700 bg-white outline-none cursor-pointer min-w-[220px]"
+              >
+                <option value="">Selecionar Kit específico...</option>
+                {kits.map((k: any) => (
+                  <option key={k.id_codigo_kit} value={k.id_codigo_kit}>
+                    {k.id_codigo_kit} — {String(k.descricao_kit || '').substring(0, 40)}{k.dados_calculo ? ' ✓' : ''}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => { setKitAtual(null); setIdMaquinaEncaixotamento(''); setIdMaquinaShrink(''); setEtapa(2); }}
+                className="flex items-center gap-1.5 border border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 font-bold px-3 py-1.5 rounded text-sm transition-colors"
+                title="Limpar seleção e voltar para a fila"
+              >
+                <i className="fas fa-eraser"></i> Limpar
+              </button>
+              <button
+                onClick={() => carregarKitsDoLote(filtroProducao, grafica)}
+                className="flex items-center gap-1.5 border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 font-bold px-3 py-1.5 rounded text-sm transition-colors"
+                title="Recarregar lista de kits do banco"
+              >
+                <i className="fas fa-sync-alt"></i> Recalcular Kits
+              </button>
+            </div>
+
             <div className="grid grid-cols-4 gap-4 mb-6">
               <div className="bg-white border border-slate-200 p-4 rounded-md shadow-sm border-l-4 border-l-slate-800">
                 <span className="text-[10px] uppercase font-bold text-slate-500 block">Itens (Kits)</span>

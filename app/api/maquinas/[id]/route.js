@@ -1,6 +1,20 @@
 import pool from '@/lib/db';
 import { NextResponse } from 'next/server';
 
+// EXCLUIR MÁQUINA (DELETE)
+export async function DELETE(request, props) {
+  try {
+    const params = await props.params;
+    const id = params.id;
+    const result = await pool.query('DELETE FROM maquinas WHERE id = $1', [id]);
+    if (result.rowCount === 0) return NextResponse.json({ message: "Máquina não encontrada." }, { status: 404 });
+    return NextResponse.json({ message: "Máquina excluída com sucesso!" }, { status: 200 });
+  } catch (error) {
+    console.error("Erro ao excluir máquina:", error);
+    return NextResponse.json({ message: "Erro ao excluir máquina." }, { status: 500 });
+  }
+}
+
 // ATUALIZAR MÁQUINA (PUT)
 export async function PUT(request, props) {
   try {

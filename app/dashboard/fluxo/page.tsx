@@ -31,8 +31,14 @@ export default function DashboardFluxoGargalos() {
   const [showFiltroLote, setShowFiltroLote] = useState(false);
   const [buscaSkuQuery, setBuscaSkuQuery] = useState('');
   const [skuDestacado, setSkuDestacado] = useState<string | null>(null);
+  const [ganttHiddenLots, setGanttHiddenLots] = useState<string[]>([]);
 
   const scrollRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('gantt_hidden_lots');
+    if (stored) { try { setGanttHiddenLots(JSON.parse(stored)); } catch(e) {} }
+  }, []);
 
   useEffect(() => {
     fetch(`/api/producao/miolo/filtros?ts=${Date.now()}`)
@@ -102,9 +108,10 @@ export default function DashboardFluxoGargalos() {
     return tarefas.filter(t => {
       const matchLote = lotesAtivos.length === 0 || lotesAtivos.includes(t.filtro_producao);
       const matchSkuText = !buscaSkuQuery || String(t.sku_alvo).toUpperCase().includes(buscaSkuQuery.toUpperCase());
-      return matchLote && matchSkuText;
+      const notHidden = !ganttHiddenLots.includes(t.filtro_producao);
+      return matchLote && matchSkuText && notHidden;
     });
-  }, [tarefas, lotesAtivos, buscaSkuQuery]);
+  }, [tarefas, lotesAtivos, buscaSkuQuery, ganttHiddenLots]);
 
   const lotesExistentes = Array.from(new Set(tarefas.map(t => t.filtro_producao)));
 

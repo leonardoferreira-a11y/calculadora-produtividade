@@ -17,12 +17,14 @@ function obterSetorPertencente(tipo: string, etapa: string): string {
 
 const MachineRow = memo(function MachineRow({
   mq, tarefasDaMaquina, gridCells, ppd, dataInicioAbsMs,
-  travasCalendario, mapaCoresLotes, skuDestacado, loteFocado, onClickSku,
+  travasCalendario, mapaCoresLotes, skuDestacado, loteFocado, kitComponentesDestacados,
+  onClickBloco, onDoubleClickCell,
 }: {
   mq: any; tarefasDaMaquina: any[]; gridCells: any[]; ppd: number;
   dataInicioAbsMs: number; travasCalendario: any[]; mapaCoresLotes: Record<string, string>;
-  skuDestacado: string | null; loteFocado: string | null;
-  onClickSku: (sku: string) => void;
+  skuDestacado: string | null; loteFocado: string | null; kitComponentesDestacados: Set<string>;
+  onClickBloco: (tarefa: any) => void;
+  onDoubleClickCell: (mqId: string, dateStr: string) => void;
 }) {
   const maxSub = tarefasDaMaquina.reduce((max: number, t: any) => Math.max(max, t.sub_linha || 0), 0);
   const alturaLinhaCalculada = Math.max(56, (maxSub + 1) * 36 + 18);
@@ -71,24 +73,37 @@ const MachineRow = memo(function MachineRow({
     const dadosExtras = tarefa.dados_tooltip || {};
     const dtInicio = new Date(tarefa._msInicio).toLocaleString('pt-BR', { timeZone:'UTC', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
     const dtFim = new Date(tarefa._msFim).toLocaleString('pt-BR', { timeZone:'UTC', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
-    const tooltipTexto = `📋 LOTE: ${tarefa.filtro_producao}\n🔖 SKU: ${tarefa.sku_alvo}\n⚙️ ETAPA: ${tarefa.nome_etapa}\n📦 Tiragem: ${dadosExtras.tiragem||'N/A'}\n📄 Paginação: ${dadosExtras.paginacao||'N/A'}\n🎨 Acabamento: ${dadosExtras.acabamento||'N/A'}\n\n⏱️ Duração Teórica Bruta: ${Number(tarefa.tempo_estimado_horas).toFixed(2)}h\n⏱️ Carga Ativa Ocupada: ${Number(tarefa.tempo_producao_efetivo).toFixed(2)}h\n\n🛑 Tempo Retido em Fila (Espera): ${Number(tarefa.tempo_espera_fila||0).toFixed(2)}h\n🛑 Horas Indisponíveis (Madrugadas / Regra): ${Number(tarefa.tempo_indisponivel_regra||0).toFixed(2)}h\n\n🟢 INÍCIO EFETIVO: ${dtInicio}\n🔴 FINAL OPERAÇÃO: ${dtFim}`;
+    const kitSkusList: string[] = dadosExtras.kit_skus || [];
+    const kitSkusLine = kitSkusList.length > 0 ? `\n\n📦 ITENS DO KIT (${kitSkusList.length}):\n${kitSkusList.join(', ')}` : '';
+    const tooltipTexto = `📋 LOTE: ${tarefa.filtro_producao}\n🔖 SKU: ${tarefa.sku_alvo}\n⚙️ ETAPA: ${tarefa.nome_etapa}\n📦 Tiragem: ${dadosExtras.tiragem||'N/A'}\n📄 Paginação: ${dadosExtras.paginacao||'N/A'}\n🎨 Acabamento: ${dadosExtras.acabamento||'N/A'}${kitSkusLine}\n\n⏱️ Duração Teórica Bruta: ${Number(tarefa.tempo_estimado_horas).toFixed(2)}h\n⏱️ Carga Ativa Ocupada: ${Number(tarefa.tempo_producao_efetivo).toFixed(2)}h\n\n🛑 Tempo Retido em Fila (Espera): ${Number(tarefa.tempo_espera_fila||0).toFixed(2)}h\n🛑 Horas Indisponíveis (Madrugadas / Regra): ${Number(tarefa.tempo_indisponivel_regra||0).toFixed(2)}h\n\n🟢 INÍCIO EFETIVO: ${dtInicio}\n🔴 FINAL OPERAÇÃO: ${dtFim}`;
     return { tarefa, left, width, widthNum, dTop, tooltipTexto };
   }), [tarefasDaMaquina, dataInicioAbsMs, ppd]);
 
   return (
     <div style={{ height: `${alturaLinhaCalculada}px` }} className="w-full border-b flex relative bg-white transition-all border-b-slate-200">
       {cellData.map(({ cell, capacidadeTotalPeriodo, cellTitle, idx }) => (
-        <div key={`bg-cell-${idx}`} title={cellTitle} style={{ width: `${cell.width}px` }} className={`flex-shrink-0 border-r border-dashed h-full hover:bg-black/5 cursor-crosshair transition-colors ${cell.isBgInativo || capacidadeTotalPeriodo === 0 ? 'bg-slate-100/80' : ''}`}></div>
+        <div key={`bg-cell-${idx}`} title={cellTitle} style={{ width: `${cell.width}px` }}
+          className={`flex-shrink-0 border-r border-dashed h-full hover:bg-black/5 cursor-crosshair transition-colors ${cell.isBgInativo || capacidadeTotalPeriodo === 0 ? 'bg-slate-100/80' : ''}`}
+          onDoubleClick={() => {
+            const d = cell.start;
+            const dateStr = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+            onDoubleClickCell(String(mq.id), dateStr);
+          }}
+        ></div>
       ))}
       {taskBlocks.map(({ tarefa, left, width, widthNum, dTop, tooltipTexto }) => {
         const corClasseFinal = `${mapaCoresLotes[tarefa.filtro_producao] || 'bg-slate-500 border-slate-700'} text-white`;
-        const isDimmedBySku = skuDestacado && skuDestacado !== tarefa.sku_alvo;
+        const isKitBlock = tarefa.nome_etapa === 'Encaixotamento' || tarefa.nome_etapa === 'Shrink';
+        const kitSkus: string[] = tarefa.dados_tooltip?.kit_skus || [];
+        const hasKitHighlight = kitComponentesDestacados.size > 0;
+        const isDimmedBySku = skuDestacado && skuDestacado !== tarefa.sku_alvo && !(hasKitHighlight && kitComponentesDestacados.has(tarefa.sku_alvo));
         const isDimmedByFoco = loteFocado && tarefa.filtro_producao !== loteFocado;
-        const opacityClass = (isDimmedBySku || isDimmedByFoco)
+        const isDimmedByKit = hasKitHighlight && !kitComponentesDestacados.has(tarefa.sku_alvo) && !kitSkus.includes(tarefa.sku_alvo);
+        const opacityClass = (isDimmedBySku || isDimmedByFoco || isDimmedByKit)
           ? 'opacity-20 grayscale scale-[0.98] pointer-events-none'
           : 'transition-all duration-150 shadow-md hover:z-50 hover:scale-105';
         return (
-          <div key={tarefa.id} onClick={() => onClickSku(tarefa.sku_alvo)}
+          <div key={tarefa.id} onClick={() => onClickBloco(tarefa)}
             className={`absolute h-7 ${corClasseFinal} ${opacityClass} rounded border flex flex-col justify-center px-1.5 cursor-pointer font-mono overflow-hidden whitespace-nowrap min-w-[20px] pointer-events-auto shadow`}
             style={{ left, width, top: `${dTop}px` }} title={tooltipTexto}>
             <span className="text-[9px] font-black truncate block">{tarefa.sku_alvo}</span>
@@ -134,6 +149,12 @@ export default function GanttIndustrial() {
   const [loadingMsg, setLoadingMsg] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [loteFocado, setLoteFocado] = useState<string | null>(null);
+  const [showModalEditeDatas, setShowModalEditeDatas] = useState(false);
+  const [blocoEditando, setBlocoEditando] = useState<any>(null);
+  const [novaDataInicio, setNovaDataInicio] = useState('');
+  const [erroDataInicio, setErroDataInicio] = useState('');
+  const [impactoToast, setImpactoToast] = useState<string | null>(null);
+  const [kitComponentesDestacados, setKitComponentesDestacados] = useState<Set<string>>(new Set());
 
   const setoresFixos = ['Impressão', 'Beneficiamento', 'Dobra', 'Corte e Vinco', 'Alceadeira', 'Acabamentos Finais', 'Formação de Kit'];
   const PALETA_LOTES = ["bg-blue-500 border-blue-700", "bg-emerald-500 border-emerald-700", "bg-rose-500 border-rose-700", "bg-amber-500 border-amber-700", "bg-purple-500 border-purple-700", "bg-sky-500 border-sky-700", "bg-fuchsia-500 border-fuchsia-700", "bg-lime-500 border-lime-700", "bg-orange-500 border-orange-700"];
@@ -145,6 +166,10 @@ export default function GanttIndustrial() {
     const saved = localStorage.getItem('gantt_simulacao_estado');
     if (saved) { try { setSimuladores(JSON.parse(saved)); } catch(e){} }
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('gantt_hidden_lots', JSON.stringify([...appliedLotesOcultos]));
+  }, [appliedLotesOcultos]);
 
   const carregarTravasDoBanco = async (graficaAlvo: string) => {
     try { const res = await fetch(`/api/producao/gantt/travas?grafica=${graficaAlvo}`); if (res.ok) setTravasCalendario(await res.json()); } catch (e) {}
@@ -190,12 +215,8 @@ export default function GanttIndustrial() {
       setDraftLotesOcultos(new Set());
       setAppliedLotesOcultos(new Set());
       setIsDirty(false);
-      // MERGE: never remove existing lotes, only add new ones at the end
-      const novosLotes = lotesUnicos as string[];
-      setDraftPrioridades(prev => {
-        const adicionados = novosLotes.filter(l => !prev.includes(l));
-        return [...prev, ...adicionados];
-      });
+      // Reset to only the lotes from this gráfica (prevent cross-gráfica contamination)
+      setDraftPrioridades(lotesUnicos as string[]);
       await carregarTravasDoBanco(graficaAlvo);
       setEtapa(2);
     } catch(e) {
@@ -265,9 +286,68 @@ export default function GanttIndustrial() {
     } catch (err) {}
   };
 
-  const handleClickSku = useCallback((sku: string) => {
+  const handleClickBloco = useCallback((tarefa: any) => {
+    const sku = tarefa.sku_alvo;
     setSkuDestacado(prev => prev === sku ? null : sku);
+    // Kit highlight: light up all component SKUs
+    const kitSkus: string[] = tarefa.dados_tooltip?.kit_skus || [];
+    if (kitSkus.length > 0) {
+      setKitComponentesDestacados(prev => {
+        if (prev.has(sku)) { return new Set(); }
+        return new Set([sku, ...kitSkus]);
+      });
+    } else {
+      setKitComponentesDestacados(new Set());
+    }
+    // Open edit modal with this block's data
+    setBlocoEditando(tarefa);
+    const d = new Date(tarefa.data_inicio);
+    setNovaDataInicio(`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`);
+    setErroDataInicio('');
+    setShowModalEditeDatas(true);
   }, []);
+
+  const handleDoubleClickCell = useCallback((mqId: string, dateStr: string) => {
+    setMaquinaTrava(mqId);
+    setDataAlvoTrava(dateStr);
+    setStatusOperacional('INATIVO');
+    setHorasDisponiveis('0.00');
+    setMotivoTrava('');
+    setAbaAtiva('TRAVAS');
+    setShowModalTravas(true);
+  }, []);
+
+  const handleSalvarDataInicio = async () => {
+    if (!blocoEditando || !novaDataInicio) return;
+    const hoje = new Date(); hoje.setUTCHours(0,0,0,0);
+    const alvo = new Date(novaDataInicio + 'T00:00:00Z');
+    if (alvo < hoje) { setErroDataInicio('A data não pode ser anterior a hoje.'); return; }
+    setErroDataInicio('');
+    // Snapshot old max fim
+    const oldMaxFim = tarefasGlobais.reduce((max, t) => Math.max(max, new Date(t.data_fim).getTime()), 0);
+    try {
+      await fetch('/api/producao/gantt/datas-iniciais', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sku: blocoEditando.sku_alvo, filtro_producao: blocoEditando.filtro_producao, grafica: graficaSelecionada, dt_calculo: novaDataInicio }),
+      });
+      setShowModalEditeDatas(false);
+      // Recalculate silently in background
+      const lotesVisiveis = draftOtimizarLacunas ? draftPrioridades.filter(l => !appliedLotesOcultos.has(l)) : [];
+      const resTar = await fetch('/api/producao/gantt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grafica: graficaSelecionada, simuladores, prioridades: draftPrioridades, lotesVisiveis }) });
+      const ts = await resTar.json();
+      if (Array.isArray(ts)) {
+        setTarefasGlobais(ts);
+        const newMaxFim = ts.reduce((max: number, t: any) => Math.max(max, new Date(t.data_fim).getTime()), 0);
+        const impactados = ts.filter((t: any) => t.sku_alvo !== blocoEditando.sku_alvo && new Date(t.data_fim).getTime() > oldMaxFim).length;
+        const fmt = (ms: number) => ms === 0 ? '-' : new Date(ms).toLocaleDateString('pt-BR', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: '2-digit' });
+        const msg = oldMaxFim !== newMaxFim
+          ? `✅ Mudança realizada! ${impactados} SKUs impactados. Data final: ${fmt(oldMaxFim)} → ${fmt(newMaxFim)}`
+          : `✅ Data atualizada. Nenhum impacto na data final geral.`;
+        setImpactoToast(msg);
+        setTimeout(() => setImpactoToast(null), 8000);
+      }
+    } catch(e) { setErroDataInicio('Erro ao salvar. Tente novamente.'); }
+  };
 
   const toggleFiltroLote = (lote: string) => {
     setDraftLotesOcultos(prev => {
@@ -510,7 +590,7 @@ export default function GanttIndustrial() {
                   <i className="fas fa-sync-alt"></i> Simular / Recalcular
                 </button>
               )}
-              {skuDestacado && <button onClick={() => setSkuDestacado(null)} className="bg-amber-500 text-slate-900 font-bold px-2 py-1.5 rounded text-[10px] uppercase shadow">Limpar SKU</button>}
+              {(skuDestacado || kitComponentesDestacados.size > 0) && <button onClick={() => { setSkuDestacado(null); setKitComponentesDestacados(new Set()); }} className="bg-amber-500 text-slate-900 font-bold px-2 py-1.5 rounded text-[10px] uppercase shadow">Limpar SKU</button>}
               <button onClick={() => setShowModalRelatorio(true)} className="bg-teal-600 hover:bg-teal-500 text-white font-bold px-3 py-1.5 rounded text-xs shadow-sm"><i className="fas fa-file-alt mr-1"></i> Prazos</button>
               <button onClick={() => setShowModalTravas(true)} className="bg-violet-600 hover:bg-violet-500 text-white font-bold px-3 py-1.5 rounded text-xs shadow-sm"><i className="fas fa-calendar-alt mr-1"></i> Calendário</button>
               <div className="flex items-center gap-2 bg-slate-700 p-1.5 rounded"><span className="text-[10px] text-slate-300 font-bold uppercase">Zoom:</span><input type="range" min="60" max="800" value={zoomPixelsPorDia} onChange={(e) => setZoomPixelsPorDia(Number(e.target.value))} className="w-24 accent-violet-500 cursor-pointer" /></div>
@@ -587,7 +667,9 @@ export default function GanttIndustrial() {
                             mapaCoresLotes={mapaCoresLotes}
                             skuDestacado={skuDestacado}
                             loteFocado={loteFocado}
-                            onClickSku={handleClickSku}
+                            kitComponentesDestacados={kitComponentesDestacados}
+                            onClickBloco={handleClickBloco}
+                            onDoubleClickCell={handleDoubleClickCell}
                           />
                         ))}
                       </div>
@@ -595,6 +677,78 @@ export default function GanttIndustrial() {
                   })}
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TOAST DE IMPACTO */}
+      {impactoToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] bg-slate-900 text-white px-6 py-3 rounded-xl shadow-2xl text-sm font-bold flex items-center gap-3 animate-in slide-in-from-bottom-4">
+          <i className="fas fa-check-circle text-emerald-400"></i>
+          {impactoToast}
+          <button onClick={() => setImpactoToast(null)} className="ml-2 text-slate-400 hover:text-white">&times;</button>
+        </div>
+      )}
+
+      {/* MODAL EDIÇÃO DE DATAS */}
+      {showModalEditeDatas && blocoEditando && (
+        <div className="fixed inset-0 bg-slate-900/60 flex justify-center items-center z-[9998] p-4 backdrop-blur-xs" onClick={(e) => { if (e.target === e.currentTarget) setShowModalEditeDatas(false); }}>
+          <div className="bg-white rounded-xl shadow-2xl border w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh]">
+            <header className="bg-slate-800 p-4 text-white flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-sm uppercase tracking-wide"><i className="fas fa-calendar-edit mr-2 text-violet-400"></i>Detalhes do Lote / SKU</h3>
+                <p className="text-[10px] text-slate-400 mt-0.5">{blocoEditando.filtro_producao} · {blocoEditando.sku_alvo}</p>
+              </div>
+              <button onClick={() => setShowModalEditeDatas(false)} className="text-slate-400 hover:text-white text-xl font-bold">&times;</button>
+            </header>
+
+            <div className="flex-1 overflow-auto p-4">
+              <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Fases Previstas</h4>
+              <div className="border rounded-lg overflow-hidden text-xs mb-4">
+                <table className="w-full">
+                  <thead className="bg-slate-50 text-[10px] font-bold text-slate-500 uppercase">
+                    <tr><th className="p-2 text-left">Etapa</th><th className="p-2 text-center">Início</th><th className="p-2 text-center">Fim</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {tarefasGlobais
+                      .filter(t => t.sku_alvo === blocoEditando.sku_alvo && t.filtro_producao === blocoEditando.filtro_producao)
+                      .sort((a, b) => new Date(a.data_inicio).getTime() - new Date(b.data_inicio).getTime())
+                      .map((t, i) => (
+                        <tr key={i} className={`hover:bg-slate-50 ${t.id === blocoEditando.id ? 'bg-violet-50 font-bold' : ''}`}>
+                          <td className="p-2 font-medium">{t.nome_etapa}</td>
+                          <td className="p-2 text-center font-mono text-slate-600">{new Date(t.data_inicio).toLocaleString('pt-BR', { timeZone:'UTC', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}</td>
+                          <td className="p-2 text-center font-mono text-slate-600">{new Date(t.data_fim).toLocaleString('pt-BR', { timeZone:'UTC', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-violet-50 border border-violet-200 rounded-lg p-4">
+                <label className="block text-[10px] font-black text-violet-800 uppercase mb-2">
+                  <i className="fas fa-calendar-alt mr-1"></i> Nova Data de Início Planejada
+                </label>
+                <input
+                  type="date"
+                  value={novaDataInicio}
+                  onChange={(e) => { setNovaDataInicio(e.target.value); setErroDataInicio(''); }}
+                  className="w-full border border-violet-300 rounded-md px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-violet-400 bg-white"
+                />
+                {erroDataInicio && (
+                  <p className="text-red-600 text-xs font-bold mt-1.5 flex items-center gap-1">
+                    <i className="fas fa-exclamation-circle"></i> {erroDataInicio}
+                  </p>
+                )}
+                <p className="text-[10px] text-violet-600 mt-1.5">Alterar esta data recalcula toda a cadeia do SKU e exibe o impacto nas datas finais.</p>
+              </div>
+            </div>
+
+            <div className="p-4 border-t bg-slate-50 flex justify-end gap-3">
+              <button onClick={() => setShowModalEditeDatas(false)} className="px-4 py-2 text-sm font-bold text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-100 transition-colors">Cancelar</button>
+              <button onClick={handleSalvarDataInicio} className="px-6 py-2 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors flex items-center gap-2">
+                <i className="fas fa-save"></i> Salvar e Recalcular
+              </button>
             </div>
           </div>
         </div>
