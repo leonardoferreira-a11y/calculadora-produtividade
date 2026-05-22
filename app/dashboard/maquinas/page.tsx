@@ -21,6 +21,7 @@ export default function ParqueMaquinas() {
 
   const [nivelLogado, setNivelLogado] = useState('');
   const [empresaLogada, setEmpresaLogada] = useState('');
+  const [confirmacaoExcluir, setConfirmacaoExcluir] = useState<{id: string, modelo: string} | null>(null);
 
   // ESTADO DOS FILTROS DROPDOWN
   const [dropdownAberto, setDropdownAberto] = useState<'graficas' | 'processos' | 'tecnologias' | null>(null);
@@ -160,7 +161,13 @@ export default function ParqueMaquinas() {
   const totalFiltrosAtivos = filtros.graficas.length + filtros.processos.length + filtros.tecnologias.length;
 
   const excluirMaquina = async (id: string, modelo: string) => {
-    if (!window.confirm(`Tem certeza que deseja excluir a máquina "${modelo}"?`)) return;
+    setConfirmacaoExcluir({ id, modelo });
+  };
+
+  const confirmarExclusao = async () => {
+    if (!confirmacaoExcluir) return;
+    const { id, modelo } = confirmacaoExcluir;
+    setConfirmacaoExcluir(null);
     try {
       const res = await fetch(`/api/maquinas/${id}`, { method: 'DELETE' });
       if (res.ok) { mostrarAvisoTela('Máquina excluída com sucesso!', 'sucesso'); buscarDados(); }
@@ -422,6 +429,19 @@ export default function ParqueMaquinas() {
           </tbody>
         </table>
       </div>
+
+      {confirmacaoExcluir && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[9999]">
+          <div className="bg-white rounded-xl shadow-2xl border w-full max-w-sm p-6">
+            <h3 className="text-lg font-bold text-slate-800 mb-2">Confirmar Exclusão</h3>
+            <p className="text-sm text-slate-600 mb-6">Tem certeza que deseja excluir a máquina <strong>"{confirmacaoExcluir.modelo}"</strong>? Esta ação não pode ser desfeita.</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setConfirmacaoExcluir(null)} className="px-4 py-2 text-sm font-bold text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-100">Cancelar</button>
+              <button onClick={confirmarExclusao} className="px-4 py-2 text-sm font-bold bg-red-600 text-white rounded-lg hover:bg-red-700">Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL DE CADASTRO/EDIÇÃO */}
       {modalAberto && (
