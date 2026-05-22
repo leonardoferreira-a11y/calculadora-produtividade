@@ -76,6 +76,8 @@ export default function RegistrosTempo() {
   const [lotesSelecionados, setLotesSelecionados] = useState<{ filtro_producao: string, grafica: string }[]>([]);
   const [carregandoLotes, setCarregandoLotes] = useState(false);
   const [acaoPendenteMassa, setAcaoPendenteMassa] = useState<'calcular' | 'apagar' | null>(null);
+  const [statusProducao, setStatusProducao] = useState('');
+  const [showCsvDropdown, setShowCsvDropdown] = useState(false);
 
   // Máquinas alocadas (Edição Manual)
   const [idMaquinaImpressao, setIdMaquinaImpressao] = useState('');
@@ -125,6 +127,15 @@ export default function RegistrosTempo() {
         }).catch(() => {});
     }
   }, [etapa, grafica]);
+
+  useEffect(() => {
+    if (filtroProducao && grafica && etapa === 2) {
+      fetch(`/api/producao/status?filtro=${encodeURIComponent(filtroProducao)}&grafica=${encodeURIComponent(grafica)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d?.status_producao) setStatusProducao(d.status_producao); else setStatusProducao(''); })
+        .catch(() => {});
+    }
+  }, [filtroProducao, grafica, etapa]);
 
   useEffect(() => {
     if (acaoPendenteMassa && skus.length > 0 && maquinasCargadas.length > 0) {
@@ -1228,14 +1239,80 @@ export default function RegistrosTempo() {
           document.body.appendChild(a); a.click(); document.body.removeChild(a);
         };
 
+        const exportarCSVConsolidado = () => {
+          const etapasOrdem: Array<[string, string]> = [
+            ['impressao', 'T.Impressão'], ['impressao_capa', 'T.Capa'], ['impressao_encarte', 'T.Encarte'],
+            ['dobra', 'T.Dobra'], ['alceamento', 'T.Alceamento'], ['grampo', 'T.Grampo'], ['espiral', 'T.Espiral'],
+          ];
+          const header = `Gráfica;Lote;SKU;${etapasOrdem.map(([,l]) => l).join(';')};T.Total`;
+          const rows: string[] = [header];
+          skus.forEach((s: any) => {
+            if (!s.dados_calculo) return;
+            const dc = s.dados_calculo;
+            let totalDec = 0;
+            const tempos = etapasOrdem.map(([key]) => {
+              const t = dc[key]?.resultado?.totais?.total || '00:00';
+              totalDec += timeToDecimal(t);
+              return t;
+            });
+            rows.push(`${grafica};${filtroProducao};${s.sku_miolo};${tempos.join(';')};${decimalToTime(totalDec)}`);
+          });
+          if (rows.length <= 1) return alert('Nenhum dado calculado para exportar.');
+          const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a'); a.href = url;
+          a.download = `Consolidado_${grafica}_${filtroProducao}.csv`;
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        };
+
         return (
           <>
             <header className="mb-4 border-b border-slate-300 pb-3 flex justify-between items-end">
-              <div><h1 className="text-xl font-bold text-slate-800 uppercase tracking-wide">Fila de Produção</h1><p className="text-sm text-slate-500 mt-1 font-mono">Ref: {filtroProducao} / {grafica}</p></div>
+              <div>
+                <h1 className="text-xl font-bold text-slate-800 uppercase tracking-wide">Fila de Produção</h1>
+                <div className="flex items-center gap-3 mt-1">
+                  <p className="text-sm text-slate-500 font-mono">Ref: {filtroProducao} / {grafica}</p>
+                  <select
+                    value={statusProducao}
+                    onChange={async (e) => {
+                      const novoStatus = e.target.value;
+                      setStatusProducao(novoStatus);
+                      await fetch('/api/producao/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filtro_producao: filtroProducao, grafica, status_producao: novoStatus }) });
+                    }}
+                    className={`text-xs font-bold border rounded px-2 py-1 outline-none cursor-pointer ${
+                      statusProducao === 'Em Análise' ? 'bg-orange-100 text-orange-800 border-orange-300' :
+                      statusProducao === 'Aprovada' ? 'bg-blue-100 text-blue-800 border-blue-300' :
+                      statusProducao === 'Em Produção' ? 'bg-yellow-100 text-yellow-800 border-yellow-300' :
+                      statusProducao === 'Produzida' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
+                      statusProducao === 'Cancelada' ? 'bg-red-100 text-red-800 border-red-300' :
+                      'bg-slate-100 text-slate-600 border-slate-300'
+                    }`}
+                  >
+                    <option value="">-- Status MES --</option>
+                    <option value="Em Análise">Em Análise</option>
+                    <option value="Aprovada">Aprovada</option>
+                    <option value="Em Produção">Em Produção</option>
+                    <option value="Produzida">Produzida</option>
+                    <option value="Cancelada">Cancelada</option>
+                  </select>
+                </div>
+              </div>
               <div className="flex gap-2">
-                <button onClick={exportarTemposCSV} className="text-sm text-teal-700 font-bold border border-teal-200 px-4 py-1.5 rounded hover:bg-teal-50 shadow-sm transition-colors">
-                  <i className="fas fa-file-csv mr-1"></i> Exportar Tempos CSV
-                </button>
+                <div className="relative">
+                  <button onClick={() => setShowCsvDropdown(v => !v)} className="text-sm text-teal-700 font-bold border border-teal-200 px-4 py-1.5 rounded hover:bg-teal-50 shadow-sm transition-colors flex items-center gap-2">
+                    <i className="fas fa-file-csv mr-1"></i> Exportar CSV <i className="fas fa-chevron-down text-xs opacity-60"></i>
+                  </button>
+                  {showCsvDropdown && (
+                    <div className="absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded shadow-xl z-50 min-w-[220px]">
+                      <button onClick={() => { exportarTemposCSV(); setShowCsvDropdown(false); }} className="w-full text-left px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 border-b">
+                        <i className="fas fa-list mr-2 text-teal-600"></i> Por Etapas (detalhado)
+                      </button>
+                      <button onClick={() => { exportarCSVConsolidado(); setShowCsvDropdown(false); }} className="w-full text-left px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50">
+                        <i className="fas fa-table mr-2 text-teal-600"></i> Por SKU Consolidado
+                      </button>
+                    </div>
+                  )}
+                </div>
                 {skusConcluidosLote > 0 && (
                   <button onClick={() => { setLimparFiltros({ acabamento: [], sku: '' }); setModalConfigLimpar(true); }} className="text-sm text-red-600 font-bold border border-red-200 px-4 py-1.5 rounded hover:bg-red-50 shadow-sm transition-colors">
                     <i className="fas fa-eraser mr-1"></i> Borracha de Engenharia

@@ -29,6 +29,7 @@ export async function POST(request) {
               COALESCE(m.horas_diarias, 24) AS horas_diarias,
               COALESCE(m.maquinas, 1) AS total_maquinas_parque,
               COALESCE(m.pessoas, 1) AS total_pessoas_parque,
+              COALESCE(d.fases_overrides, '{}')::text AS fases_overrides,
               pm.tiragem AS pm_tiragem,
               pm.paginacao AS pm_paginacao,
               pm.acabamento AS pm_acabamento,
@@ -50,7 +51,8 @@ export async function POST(request) {
          ON UPPER(TRIM(t.sku_alvo)) = UPPER(TRIM(pm.sku_miolo))
         AND UPPER(TRIM(t.filtro_producao)) = UPPER(TRIM(pm.filtro_producao))
         AND UPPER(TRIM(t.grafica)) = UPPER(TRIM(pm.grafica))
-       WHERE UPPER(TRIM(t.grafica)) = UPPER(TRIM($1))`,
+       WHERE UPPER(TRIM(t.grafica)) = UPPER(TRIM($1))
+         AND (t.status_producao IS NULL OR UPPER(TRIM(t.status_producao)) NOT IN ('PRODUZIDA', 'CANCELADA'))`,
       [grafica]
     );
 
@@ -98,6 +100,19 @@ export async function POST(request) {
                 (!maqT.includes('auto') && !maqT.includes('semi') && !maqM.includes('auto') && !maqM.includes('semi'))
             )
         };
+    });
+
+    // Apply fases_overrides: override ideal_inicio per phase if set
+    indefinitas = indefinitas.map(t => {
+      let overrides = {};
+      try { overrides = typeof t.fases_overrides === 'string' ? JSON.parse(t.fases_overrides) : (t.fases_overrides || {}); } catch(e) {}
+      const overrideVal = overrides[t.nome_etapa];
+      if (overrideVal) {
+        const overrideDate = new Date(overrideVal);
+        const baseDate = new Date(t.ideal_inicio);
+        return { ...t, ideal_inicio: overrideDate, is_antecipacao: overrideDate < baseDate };
+      }
+      return t;
     });
 
     // MODO FLUIDO: filter to only visible lotes so the engine fills the gaps
@@ -474,7 +489,8 @@ export async function POST(request) {
         tempo_indisponivel_regra: janelaFinal.horasIndisponiveisRegra,
         sub_linha: slotEscolhidoIndex,
         _isPUR: tarefa._isPUR,
-        _isAlc: tarefa._isAlc
+        _isAlc: tarefa._isAlc,
+        is_antecipacao: tarefa.is_antecipacao || false
       };
 
       tarefasResolvidas.push(novaResolvida);

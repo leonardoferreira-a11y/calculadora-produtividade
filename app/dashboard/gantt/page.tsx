@@ -104,7 +104,7 @@ const MachineRow = memo(function MachineRow({
           : 'transition-all duration-150 shadow-md hover:z-50 hover:scale-105';
         return (
           <div key={tarefa.id} onClick={() => onClickBloco(tarefa)}
-            className={`absolute h-7 ${corClasseFinal} ${opacityClass} rounded border flex flex-col justify-center px-1.5 cursor-pointer font-mono overflow-hidden whitespace-nowrap min-w-[20px] pointer-events-auto shadow`}
+            className={`absolute h-7 ${corClasseFinal} ${opacityClass} rounded flex flex-col justify-center px-1.5 cursor-pointer font-mono overflow-hidden whitespace-nowrap min-w-[20px] pointer-events-auto shadow ${tarefa.is_antecipacao ? 'border-2 border-dashed border-red-400' : 'border'}`}
             style={{ left, width, top: `${dTop}px` }} title={tooltipTexto}>
             <span className="text-[9px] font-black truncate block">{tarefa.sku_alvo}</span>
             {widthNum > 50 && <span className="text-[7px] opacity-80 truncate block uppercase">{tarefa.nome_etapa} (F.{tarefa.sub_linha + 1})</span>}
@@ -154,6 +154,7 @@ export default function GanttIndustrial() {
   const [novaDataInicio, setNovaDataInicio] = useState('');
   const [erroDataInicio, setErroDataInicio] = useState('');
   const [impactoToast, setImpactoToast] = useState<string | null>(null);
+  const [fasesOverrides, setFasesOverrides] = useState<Record<string, string>>({});
   const [kitComponentesDestacados, setKitComponentesDestacados] = useState<Set<string>>(new Set());
 
   const setoresFixos = ['Impressão', 'Beneficiamento', 'Dobra', 'Corte e Vinco', 'Alceadeira', 'Acabamentos Finais', 'Formação de Kit'];
@@ -216,11 +217,15 @@ export default function GanttIndustrial() {
       setAppliedLotesOcultos(new Set());
       setIsDirty(false);
       // Reset to only the lotes from this gráfica (prevent cross-gráfica contamination)
-      setDraftPrioridades(lotesUnicos as string[]);
+      setDraftPrioridades(prev => {
+        const refOrder = prioridades.length > 0 ? prioridades : prev;
+        const novosMissing = (lotesUnicos as string[]).filter(l => !refOrder.includes(l));
+        return [...refOrder.filter(l => (lotesUnicos as string[]).includes(l)), ...novosMissing];
+      });
       await carregarTravasDoBanco(graficaAlvo);
       setEtapa(2);
     } catch(e) {
-      alert("Falha na conexão. Recarregue a página e tente novamente.");
+      setImpactoToast('⚠️ Falha na conexão. Recarregue a página e tente novamente.');
     } finally {
       setIsLoading(false);
     }
@@ -319,18 +324,16 @@ export default function GanttIndustrial() {
 
   const handleSalvarDataInicio = async () => {
     if (!blocoEditando || !novaDataInicio) return;
-    const hoje = new Date(); hoje.setUTCHours(0,0,0,0);
-    const alvo = new Date(novaDataInicio + 'T00:00:00Z');
-    if (alvo < hoje) { setErroDataInicio('A data não pode ser anterior a hoje.'); return; }
     setErroDataInicio('');
     // Snapshot old max fim
     const oldMaxFim = tarefasGlobais.reduce((max, t) => Math.max(max, new Date(t.data_fim).getTime()), 0);
     try {
       await fetch('/api/producao/gantt/datas-iniciais', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sku: blocoEditando.sku_alvo, filtro_producao: blocoEditando.filtro_producao, grafica: graficaSelecionada, dt_calculo: novaDataInicio }),
+        body: JSON.stringify({ sku: blocoEditando.sku_alvo, filtro_producao: blocoEditando.filtro_producao, grafica: graficaSelecionada, dt_calculo: novaDataInicio, fases_overrides: fasesOverrides }),
       });
       setShowModalEditeDatas(false);
+      setFasesOverrides({});
       // Recalculate silently in background
       const lotesVisiveis = draftOtimizarLacunas ? draftPrioridades.filter(l => !appliedLotesOcultos.has(l)) : [];
       const resTar = await fetch('/api/producao/gantt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grafica: graficaSelecionada, simuladores, prioridades: draftPrioridades, lotesVisiveis }) });
@@ -725,9 +728,9 @@ export default function GanttIndustrial() {
                 </table>
               </div>
 
-              <div className="bg-violet-50 border border-violet-200 rounded-lg p-4">
+              <div className="bg-violet-50 border border-violet-200 rounded-lg p-4 mb-3">
                 <label className="block text-[10px] font-black text-violet-800 uppercase mb-2">
-                  <i className="fas fa-calendar-alt mr-1"></i> Nova Data de Início Planejada
+                  <i className="fas fa-calendar-alt mr-1"></i> Nova Data de Início Planejada (SKU)
                 </label>
                 <input
                   type="date"
@@ -740,12 +743,44 @@ export default function GanttIndustrial() {
                     <i className="fas fa-exclamation-circle"></i> {erroDataInicio}
                   </p>
                 )}
-                <p className="text-[10px] text-violet-600 mt-1.5">Alterar esta data recalcula toda a cadeia do SKU e exibe o impacto nas datas finais.</p>
+              </div>
+              <div className="border rounded-lg overflow-hidden">
+                <div className="bg-slate-100 px-3 py-2 text-[10px] font-black text-slate-600 uppercase tracking-wider">Replanejar Fase Específica (Override)</div>
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50">
+                    <tr><th className="p-2 text-left font-bold text-slate-500 uppercase text-[10px]">Etapa</th><th className="p-2 text-center font-bold text-slate-500 uppercase text-[10px]">Nova Data/Hora</th><th className="p-2 text-center font-bold text-slate-500 uppercase text-[10px]">Status</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {tarefasGlobais
+                      .filter(t => t.sku_alvo === blocoEditando.sku_alvo && t.filtro_producao === blocoEditando.filtro_producao)
+                      .sort((a, b) => new Date(a.data_inicio).getTime() - new Date(b.data_inicio).getTime())
+                      .map((t, i) => {
+                        const baseDate = new Date(t.data_inicio);
+                        const baseDateStr = `${baseDate.getUTCFullYear()}-${String(baseDate.getUTCMonth()+1).padStart(2,'0')}-${String(baseDate.getUTCDate()).padStart(2,'0')}T${String(baseDate.getUTCHours()).padStart(2,'0')}:${String(baseDate.getUTCMinutes()).padStart(2,'0')}`;
+                        const overrideVal = fasesOverrides[t.nome_etapa] || '';
+                        const isAntecipacao = overrideVal && new Date(overrideVal) < baseDate;
+                        return (
+                          <tr key={i} className="hover:bg-slate-50">
+                            <td className="p-2 font-medium text-slate-700">{t.nome_etapa}</td>
+                            <td className="p-2">
+                              <input type="datetime-local" value={overrideVal || baseDateStr}
+                                onChange={(e) => setFasesOverrides(prev => ({ ...prev, [t.nome_etapa]: e.target.value }))}
+                                className="w-full border border-slate-200 rounded px-2 py-1 text-xs font-mono outline-none focus:ring-1 focus:ring-violet-400"
+                              />
+                            </td>
+                            <td className="p-2 text-center">
+                              {overrideVal ? (isAntecipacao ? <span className="text-[10px] font-bold text-red-600">⚡ Antecipação</span> : <span className="text-[10px] font-bold text-blue-600">→ Override</span>) : <span className="text-[10px] text-slate-400">Base</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
               </div>
             </div>
 
             <div className="p-4 border-t bg-slate-50 flex justify-end gap-3">
-              <button onClick={() => setShowModalEditeDatas(false)} className="px-4 py-2 text-sm font-bold text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-100 transition-colors">Cancelar</button>
+              <button onClick={() => { setShowModalEditeDatas(false); setFasesOverrides({}); }} className="px-4 py-2 text-sm font-bold text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-100 transition-colors">Cancelar</button>
               <button onClick={handleSalvarDataInicio} className="px-6 py-2 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors flex items-center gap-2">
                 <i className="fas fa-save"></i> Salvar e Recalcular
               </button>

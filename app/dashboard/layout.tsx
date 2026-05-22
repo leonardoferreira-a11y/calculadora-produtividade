@@ -11,7 +11,8 @@ const RBAC: Record<string, string[]> = {
   '/dashboard/registros':  ['ADMIN', 'USER_ARCO', 'USER_GRAFICA'],
   '/dashboard/calculo-kits': ['ADMIN', 'USER_ARCO', 'USER_GRAFICA'],
   '/dashboard/gantt':      ['ADMIN', 'ADMIN_MAQ', 'USER_ARCO'],
-  '/dashboard/fluxo':      ['ADMIN', 'USER_ARCO'],
+  // '/dashboard/fluxo':   ['ADMIN', 'USER_ARCO'],  // oculto — módulo interno
+  '/dashboard/pcp':        ['ADMIN', 'USER_ARCO'],
   '/dashboard/acessos':    ['ADMIN'],
 };
 
@@ -33,7 +34,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { titulo: 'Cálculo de Produção',   rota: '/dashboard/registros' },
     { titulo: 'Cálculo de Kits',       rota: '/dashboard/calculo-kits' },
     { titulo: 'Gantt',                 rota: '/dashboard/gantt' },
-    { titulo: 'Dashboard - Fluxo',     rota: '/dashboard/fluxo' },
+    // { titulo: 'Dashboard - Fluxo', rota: '/dashboard/fluxo' },  // oculto — módulo interno
+    { titulo: 'Portal PCP',            rota: '/dashboard/pcp' },
     { titulo: 'Acessos',               rota: '/dashboard/acessos' },
   ];
 
