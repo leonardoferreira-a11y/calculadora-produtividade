@@ -125,12 +125,12 @@ export async function POST(request) {
       return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}Z`;
     };
 
-    const alinharProximoTurnoValido = (data, diasTrabalho, horasDiarias) => {
+    const alinharProximoTurnoValido = (data, diasTrabalho, horasDiarias, maquinaId = null) => {
       let r = new Date(data);
       let limiteSafety = 365;
       while (limiteSafety > 0) {
         limiteSafety--;
-        const diaSemana = r.getUTCDay(); 
+        const diaSemana = r.getUTCDay();
         if (Number(diasTrabalho) === 5 && (diaSemana === 0 || diaSemana === 6)) {
           r.setUTCDate(r.getUTCDate() + (diaSemana === 6 ? 2 : 1));
           r.setUTCHours(0, 0, 0, 0); continue;
@@ -138,6 +138,17 @@ export async function POST(request) {
         if (Number(diasTrabalho) === 6 && diaSemana === 0) {
           r.setUTCDate(r.getUTCDate() + 1);
           r.setUTCHours(0, 0, 0, 0); continue;
+        }
+        // Skip INATIVO calendar lock days so tasks never start on locked days
+        if (maquinaId) {
+          const ano = r.getUTCFullYear();
+          const mes = String(r.getUTCMonth() + 1).padStart(2, '0');
+          const dia = String(r.getUTCDate()).padStart(2, '0');
+          const trava = travasMap.get(`${UPPER_CASE(maquinaId)}_${ano}-${mes}-${dia}`);
+          if (trava && trava.status_operacional === 'INATIVO') {
+            r.setUTCDate(r.getUTCDate() + 1);
+            r.setUTCHours(0, 0, 0, 0); continue;
+          }
         }
         const horaAtualDecimal = r.getUTCHours() + (r.getUTCMinutes() / 60);
         if (horaAtualDecimal >= Number(horasDiarias)) {
@@ -150,7 +161,7 @@ export async function POST(request) {
     };
 
     const simularJanelaDeTrabalho = (dataInicioStr, horasNecessarias, maquinaId, diasTrabalhoBase, horasDiariasBase) => {
-      let relogio = alinharProximoTurnoValido(dataInicioStr, diasTrabalhoBase, horasDiariasBase);
+      let relogio = alinharProximoTurnoValido(dataInicioStr, diasTrabalhoBase, horasDiariasBase, maquinaId);
       let horasFaltantes = Number(horasNecessarias);
       let dataInicioEfetivo = new Date(relogio);
       let horasIndisponiveisRegra = 0;
@@ -159,7 +170,7 @@ export async function POST(request) {
       while (horasFaltantes > 0 && limiteLoops > 0) {
         limiteLoops--;
         let relogioAntes = new Date(relogio);
-        relogio = alinharProximoTurnoValido(relogio, diasTrabalhoBase, horasDiariasBase);
+        relogio = alinharProximoTurnoValido(relogio, diasTrabalhoBase, horasDiariasBase, maquinaId);
         
         if (relogio.getTime() > relogioAntes.getTime()) horasIndisponiveisRegra += (relogio.getTime() - relogioAntes.getTime()) / (1000 * 60 * 60);
 
@@ -531,48 +542,67 @@ export async function POST(request) {
         if (!maxFim) continue; // no resolved tasks for this kit's SKUs yet
 
         const dc = kit.dados_calculo;
-        const operacoes = [];
 
-        if (dc.encaixotamento?.maquina_id && dc.encaixotamento?.resultado) {
-          const horas = horasDeString(dc.encaixotamento.resultado.totais?.total);
-          if (horas > 0) operacoes.push({ tipo: 'Encaixotamento', mqId: String(dc.encaixotamento.maquina_id), horas });
-        }
+        // Shrink MUST run before Encaixotamento — schedule Shrink first
+        let shrinkFim = new Date(maxFim);
         if (dc.shrink?.maquina_id && dc.shrink?.resultado) {
           const horas = horasDeString(dc.shrink.resultado.totais?.total);
-          if (horas > 0) operacoes.push({ tipo: 'Shrink', mqId: String(dc.shrink.maquina_id), horas });
+          if (horas > 0) {
+            const mqId = String(dc.shrink.maquina_id);
+            const filaAtual = controleMaquinasFim[mqId];
+            let tAtual = new Date(maxFim);
+            if (filaAtual) { const menorFim = new Date(Math.min(...filaAtual.map(d => d.getTime()))); if (menorFim > tAtual) tAtual = menorFim; }
+            const janela = simularJanelaDeTrabalho(tAtual, horas, mqId, 5, 24);
+            if (!controleMaquinasFim[mqId]) controleMaquinasFim[mqId] = [janela.fim];
+            else controleMaquinasFim[mqId][0] = janela.fim;
+            shrinkFim = janela.fim;
+            tarefasResolvidas.push({
+              id: `kit-${UPPER_CASE(kit.id)}-Shrink`,
+              sku_alvo: kit.id,
+              filtro_producao: String(kit.filtro || 'Kit'),
+              nome_etapa: 'Shrink',
+              maquina_id: mqId,
+              maq_tipo: 'Shrink', maq_modelo: 'Shrink',
+              tempo_estimado_horas: horas,
+              data_inicio: formataAbsoluto(janela.inicio),
+              data_fim: formataAbsoluto(janela.fim),
+              id_dependencia: null, status_tarefa: 'Pendente',
+              dados_tooltip: { tiragem: 'Kit', paginacao: 'Kit', acabamento: 'Shrink', kit_skus: kit.skus },
+              tempo_producao_efetivo: horas,
+              tempo_indisponivel_regra: janela.horasIndisponiveisRegra,
+              sub_linha: 0,
+            });
+          }
         }
 
-        let inicioKit = new Date(maxFim);
-        for (const op of operacoes) {
-          // Respect any existing queue on the kit machine
-          const filaAtual = controleMaquinasFim[op.mqId];
-          let tAtual = inicioKit;
-          if (filaAtual) {
-            const menorFim = new Date(Math.min(...filaAtual.map(d => d.getTime())));
-            if (menorFim > tAtual) tAtual = menorFim;
+        // Encaixotamento starts at Math.max(maxFim, shrinkFim)
+        if (dc.encaixotamento?.maquina_id && dc.encaixotamento?.resultado) {
+          const horas = horasDeString(dc.encaixotamento.resultado.totais?.total);
+          if (horas > 0) {
+            const mqId = String(dc.encaixotamento.maquina_id);
+            const filaAtual = controleMaquinasFim[mqId];
+            let tAtual = shrinkFim > maxFim ? shrinkFim : new Date(maxFim);
+            if (filaAtual) { const menorFim = new Date(Math.min(...filaAtual.map(d => d.getTime()))); if (menorFim > tAtual) tAtual = menorFim; }
+            const janela = simularJanelaDeTrabalho(tAtual, horas, mqId, 5, 24);
+            if (!controleMaquinasFim[mqId]) controleMaquinasFim[mqId] = [janela.fim];
+            else controleMaquinasFim[mqId][0] = janela.fim;
+            tarefasResolvidas.push({
+              id: `kit-${UPPER_CASE(kit.id)}-Encaixotamento`,
+              sku_alvo: kit.id,
+              filtro_producao: String(kit.filtro || 'Kit'),
+              nome_etapa: 'Encaixotamento',
+              maquina_id: mqId,
+              maq_tipo: 'Encaixotamento', maq_modelo: 'Encaixotamento',
+              tempo_estimado_horas: horas,
+              data_inicio: formataAbsoluto(janela.inicio),
+              data_fim: formataAbsoluto(janela.fim),
+              id_dependencia: null, status_tarefa: 'Pendente',
+              dados_tooltip: { tiragem: 'Kit', paginacao: 'Kit', acabamento: 'Encaixotamento', kit_skus: kit.skus },
+              tempo_producao_efetivo: horas,
+              tempo_indisponivel_regra: janela.horasIndisponiveisRegra,
+              sub_linha: 0,
+            });
           }
-          const janela = simularJanelaDeTrabalho(tAtual, op.horas, op.mqId, 5, 24);
-          if (!controleMaquinasFim[op.mqId]) controleMaquinasFim[op.mqId] = [janela.fim];
-          else controleMaquinasFim[op.mqId][0] = janela.fim;
-
-          tarefasResolvidas.push({
-            id: `kit-${UPPER_CASE(kit.id)}-${op.tipo}`,
-            sku_alvo: kit.id,
-            filtro_producao: String(kit.filtro || 'Kit'),
-            nome_etapa: op.tipo,
-            maquina_id: op.mqId,
-            maq_tipo: op.tipo,
-            maq_modelo: op.tipo,
-            tempo_estimado_horas: op.horas,
-            data_inicio: formataAbsoluto(janela.inicio),
-            data_fim: formataAbsoluto(janela.fim),
-            id_dependencia: null,
-            status_tarefa: 'Pendente',
-            dados_tooltip: { tiragem: 'Kit', paginacao: 'Kit', acabamento: op.tipo },
-            tempo_producao_efetivo: op.horas,
-            tempo_indisponivel_regra: janela.horasIndisponiveisRegra,
-            sub_linha: 0,
-          });
         }
       }
     } catch(kitErr) {

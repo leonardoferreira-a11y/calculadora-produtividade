@@ -1202,11 +1202,40 @@ export default function RegistrosTempo() {
           return acc + somaDec;
         }, 0);
 
+        const exportarTemposCSV = () => {
+          const rows: string[] = ['Gráfica;Lote;SKU;Etapa;Tempo Setup;Tempo Rodagem;Tempo Total'];
+          const secoes: Array<[string, string]> = [
+            ['impressao', 'Impressão Miolo'], ['impressao_capa', 'Impressão Capa'],
+            ['impressao_encarte', 'Impressão Encarte'], ['impressao_adesivo', 'Impressão Adesivo'],
+            ['corte_vinco', 'Corte e Vinco'], ['beneficiamento_capa', 'Beneficiamento Capa'],
+            ['empastamento_capa', 'Empastamento Capa'], ['dobra', 'Dobra'],
+            ['alceamento', 'Alceamento'], ['grampo', 'Grampo'], ['espiral', 'Espiral'],
+          ];
+          skus.forEach((s: any) => {
+            if (!s.dados_calculo) return;
+            const dc = s.dados_calculo;
+            secoes.forEach(([key, label]) => {
+              const r = dc[key]?.resultado;
+              if (!r?.totais) return;
+              rows.push(`${grafica};${filtroProducao};${s.sku_miolo};${label};${r.totais.setup || '00:00'};${r.totais.rodagem || '00:00'};${r.totais.total || '00:00'}`);
+            });
+          });
+          if (rows.length <= 1) return alert('Nenhum dado calculado para exportar.');
+          const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a'); a.href = url;
+          a.download = `Tempos_${grafica}_${filtroProducao}.csv`;
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        };
+
         return (
           <>
             <header className="mb-4 border-b border-slate-300 pb-3 flex justify-between items-end">
               <div><h1 className="text-xl font-bold text-slate-800 uppercase tracking-wide">Fila de Produção</h1><p className="text-sm text-slate-500 mt-1 font-mono">Ref: {filtroProducao} / {grafica}</p></div>
               <div className="flex gap-2">
+                <button onClick={exportarTemposCSV} className="text-sm text-teal-700 font-bold border border-teal-200 px-4 py-1.5 rounded hover:bg-teal-50 shadow-sm transition-colors">
+                  <i className="fas fa-file-csv mr-1"></i> Exportar Tempos CSV
+                </button>
                 {skusConcluidosLote > 0 && (
                   <button onClick={() => { setLimparFiltros({ acabamento: [], sku: '' }); setModalConfigLimpar(true); }} className="text-sm text-red-600 font-bold border border-red-200 px-4 py-1.5 rounded hover:bg-red-50 shadow-sm transition-colors">
                     <i className="fas fa-eraser mr-1"></i> Borracha de Engenharia

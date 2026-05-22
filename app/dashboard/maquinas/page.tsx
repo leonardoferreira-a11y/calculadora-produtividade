@@ -159,6 +159,15 @@ export default function ParqueMaquinas() {
 
   const totalFiltrosAtivos = filtros.graficas.length + filtros.processos.length + filtros.tecnologias.length;
 
+  const excluirMaquina = async (id: string, modelo: string) => {
+    if (!window.confirm(`Tem certeza que deseja excluir a máquina "${modelo}"?`)) return;
+    try {
+      const res = await fetch(`/api/maquinas/${id}`, { method: 'DELETE' });
+      if (res.ok) { mostrarAvisoTela('Máquina excluída com sucesso!', 'sucesso'); buscarDados(); }
+      else mostrarAvisoTela('Erro ao excluir máquina.', 'erro');
+    } catch(e) { mostrarAvisoTela('Erro de conexão.', 'erro'); }
+  };
+
   // ----------------------------------------------------------------------
   // FUNÇÃO DE DUPLICAÇÃO DE MÁQUINAS COM OS ESTADOS CORRETOS DO SEU PROJETO
   // ----------------------------------------------------------------------
@@ -390,12 +399,19 @@ export default function ParqueMaquinas() {
                         </button>
 
                         {/* 🔴 BOTÃO DUPLICAR CORRIGIDO DA LINHA (LENDO A VARIÁVEL M DO MAP) */}
-                        <button 
+                        <button
                           onClick={() => duplicarMaquina(m)}
                           className="text-slate-400 hover:text-blue-600 transition-colors px-2 text-base"
                           title="Duplicar Especificações"
                         >
                           <i className="fas fa-copy"></i>
+                        </button>
+                        <button
+                          onClick={() => excluirMaquina(m.id, m.modelo)}
+                          className="text-slate-400 hover:text-red-600 transition-colors px-2 text-base"
+                          title="Excluir Máquina"
+                        >
+                          <i className="fas fa-trash-alt"></i>
                         </button>
                       </td>
                     )}
