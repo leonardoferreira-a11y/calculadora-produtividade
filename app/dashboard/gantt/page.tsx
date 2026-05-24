@@ -468,21 +468,35 @@ export default function GanttIndustrial() {
     tarefasFiltradas.forEach(t => {
       const start = t._msInicio; const end = t._msFim;
       const etapaStr = String(t.nome_etapa).toLowerCase();
-      if (!skusObj[t.sku_alvo]) skusObj[t.sku_alvo] = { lote: t.filtro_producao, inicioImp: Infinity, fimImp: 0, inicioAcab: Infinity, fimAcabFinais: 0, inicioKit: Infinity, fimKit: 0 };
+      if (!skusObj[t.sku_alvo]) skusObj[t.sku_alvo] = {
+        lote: t.filtro_producao,
+        tiragem: t.dados_tooltip?.tiragem || 'N/A',
+        paginacao: t.dados_tooltip?.paginacao || 'N/A',
+        acabamento: t.dados_tooltip?.acabamento || 'N/A',
+        inicioImp: Infinity, fimImp: 0, inicioAcab: Infinity, fimAcabFinais: 0, inicioKit: Infinity, fimKit: 0
+      };
       const obj = skusObj[t.sku_alvo];
       if (etapaStr.includes('impress')) { if (start < obj.inicioImp) obj.inicioImp = start; if (end > obj.fimImp) obj.fimImp = end; }
       if (!etapaStr.includes('impress') && !etapaStr.includes('shrink') && !etapaStr.includes('encaixot') && !etapaStr.includes('kit')) { if (start < obj.inicioAcab) obj.inicioAcab = start; if (end > obj.fimAcabFinais) obj.fimAcabFinais = end; }
       if (etapaStr.includes('shrink') || etapaStr.includes('encaixot') || etapaStr.includes('kit')) { if (start < obj.inicioKit) obj.inicioKit = start; if (end > obj.fimKit) obj.fimKit = end; }
     });
     const format = (ts: number) => ts === Infinity || ts === 0 ? '-' : new Date(ts).toLocaleString('pt-BR', { timeZone:'UTC', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
-    return Object.entries(skusObj).map(([sku, dados]) => ({ sku, lote: dados.lote, inicioImp: format(dados.inicioImp), fimImp: format(dados.fimImp), inicioAcab: format(dados.inicioAcab), fimAcabFinais: format(dados.fimAcabFinais), inicioKit: format(dados.inicioKit), fimKit: format(dados.fimKit) })).sort((a, b) => a.lote.localeCompare(b.lote));
+    return Object.entries(skusObj).map(([sku, dados]) => ({
+      sku, lote: dados.lote,
+      tiragem: dados.tiragem,
+      paginacao: dados.paginacao,
+      acabamento: dados.acabamento,
+      inicioImp: format(dados.inicioImp), fimImp: format(dados.fimImp),
+      inicioAcab: format(dados.inicioAcab), fimAcabFinais: format(dados.fimAcabFinais),
+      inicioKit: format(dados.inicioKit), fimKit: format(dados.fimKit)
+    })).sort((a, b) => a.lote.localeCompare(b.lote));
   };
 
   const exportarRelatorioCSV = () => {
     const dados = gerarRelatorioPorSKU();
     if (dados.length === 0) return alert("Nenhum dado para exportar.");
-    let csvContent = "Lote;SKU;Inicio Impressao;Fim Impressao;Inicio Acabamentos;Fim Acabamentos Finais;Inicio Formacao Kit;Termino Geral\n";
-    dados.forEach(d => { csvContent += `${d.lote};${d.sku};${d.inicioImp};${d.fimImp};${d.inicioAcab};${d.fimAcabFinais};${d.inicioKit};${d.fimKit}\n`; });
+    let csvContent = "Lote;SKU;Tiragem;Paginacao;Acabamento;Inicio Impressao;Fim Impressao;Inicio Acabamentos;Fim Acabamentos Finais;Inicio Formacao Kit;Termino Geral\n";
+    dados.forEach(d => { csvContent += `${d.lote};${d.sku};${d.tiragem || ''};${d.paginacao || ''};${d.acabamento || ''};${d.inicioImp};${d.fimImp};${d.inicioAcab};${d.fimAcabFinais};${d.inicioKit};${d.fimKit}\n`; });
     const blob = new Blob(["﻿" + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -804,6 +818,9 @@ export default function GanttIndustrial() {
                 <thead>
                   <tr className="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider sticky top-0 shadow-sm">
                     <th className="p-3 border-b border-slate-200">Lote</th><th className="p-3 border-b border-slate-200">SKU Alvo</th>
+                    <th className="p-3 border-b border-slate-200 text-center">Tiragem</th>
+                    <th className="p-3 border-b border-slate-200 text-center">Paginação</th>
+                    <th className="p-3 border-b border-slate-200 text-center">Acabamento</th>
                     <th className="p-3 border-b border-slate-200 text-center text-sky-800 bg-sky-50/50">Início Impressão</th>
                     <th className="p-3 border-b border-slate-200 text-center text-sky-800 bg-sky-50/50 border-r border-slate-200">Fim Impressão</th>
                     <th className="p-3 border-b border-slate-200 text-amber-800 bg-amber-50/50 text-center">Início Acabamentos</th>
@@ -817,6 +834,9 @@ export default function GanttIndustrial() {
                     <tr key={idx} className="hover:bg-slate-50 transition-colors">
                       <td className="p-3 font-bold text-teal-800"><span className={`px-2 py-0.5 rounded text-white ${mapaCoresLotes[item.lote]}`}>{item.lote}</span></td>
                       <td className="p-3 font-black text-slate-800">{item.sku}</td>
+                      <td className="p-3 font-mono text-center text-slate-600">{item.tiragem}</td>
+                      <td className="p-3 font-mono text-center text-slate-600">{item.paginacao}</td>
+                      <td className="p-3 text-center text-slate-600 text-[10px]">{item.acabamento}</td>
                       <td className="p-3 font-mono text-center text-sky-900 bg-sky-50/20">{item.inicioImp}</td>
                       <td className="p-3 font-mono font-bold text-center border-r border-slate-200 text-sky-900 bg-sky-50/20">{item.fimImp}</td>
                       <td className="p-3 font-mono text-center text-amber-900 bg-amber-50/20">{item.inicioAcab}</td>
