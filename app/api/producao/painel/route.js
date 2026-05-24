@@ -8,8 +8,15 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const grafica = searchParams.get('grafica');
+    const filtro = searchParams.get('filtro');
     if (!grafica) return NextResponse.json([]);
 
+    const params = [grafica];
+    let where = `WHERE UPPER(TRIM(t.grafica)) = UPPER(TRIM($1))`;
+    if (filtro) {
+      where += ` AND UPPER(TRIM(t.filtro_producao)) = UPPER(TRIM($2))`;
+      params.push(filtro);
+    }
     const res = await pool.query(
       `SELECT
          t.filtro_producao AS lote,
@@ -26,10 +33,10 @@ export async function GET(request) {
          ON UPPER(TRIM(t.sku_alvo)) = UPPER(TRIM(pm.sku_miolo))
         AND UPPER(TRIM(t.filtro_producao)) = UPPER(TRIM(pm.filtro_producao))
         AND UPPER(TRIM(t.grafica)) = UPPER(TRIM(pm.grafica))
-       WHERE UPPER(TRIM(t.grafica)) = UPPER(TRIM($1))
+       ${where}
        GROUP BY t.filtro_producao, t.sku_alvo, t.grafica
        ORDER BY t.filtro_producao, t.sku_alvo`,
-      [grafica]
+      params
     );
     return NextResponse.json(res.rows);
   } catch(e) {
