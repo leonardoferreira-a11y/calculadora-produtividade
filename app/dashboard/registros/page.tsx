@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, Fragment } from 'react';
 
 // Auxiliares de conversão de tempo
 const timeToDecimal = (timeStr: string) => {
@@ -74,6 +74,12 @@ export default function RegistrosTempo() {
   const [feedback, setFeedback] = useState({ msg: '', tipo: '' });
 
   const [lotesSelecionados, setLotesSelecionados] = useState<{ filtro_producao: string, grafica: string }[]>([]);
+  const [expandedLotes, setExpandedLotes] = useState<Set<string>>(new Set());
+  const [skusByLote, setSkusByLote] = useState<Map<string, any[]>>(new Map());
+  const [loadingExpandLotes, setLoadingExpandLotes] = useState<Set<string>>(new Set());
+  const [skusSelecionadosStatus, setSkusSelecionadosStatus] = useState<Array<{sku_alvo: string, filtro_producao: string, grafica: string}>>([]);
+  const [bulkStatusValue, setBulkStatusValue] = useState('');
+  const [isApplyingStatus, setIsApplyingStatus] = useState(false);
   const [carregandoLotes, setCarregandoLotes] = useState(false);
   const [acaoPendenteMassa, setAcaoPendenteMassa] = useState<'calcular' | 'apagar' | null>(null);
   const [statusProducao, setStatusProducao] = useState('');
@@ -246,6 +252,70 @@ export default function RegistrosTempo() {
   };
 
   const toggleSecao = (secao: string) => { setSecoes(prev => ({ ...prev, [secao]: !prev[secao as keyof typeof secoes] })); };
+
+  const toggleExpandLote = async (filtro_producao: string, grafica_lote: string) => {
+    const key = `${filtro_producao}|${grafica_lote}`;
+    setExpandedLotes(prev => {
+      const n = new Set(prev);
+      if (n.has(key)) { n.delete(key); return n; }
+      n.add(key); return n;
+    });
+    if (!skusByLote.has(key) && !loadingExpandLotes.has(key)) {
+      setLoadingExpandLotes(prev => new Set([...prev, key]));
+      try {
+        const res = await fetch(`/api/producao/painel?grafica=${encodeURIComponent(grafica_lote)}&filtro=${encodeURIComponent(filtro_producao)}`);
+        const data = await res.json();
+        setSkusByLote(prev => new Map([...prev, [key, Array.isArray(data) ? data : []]]));
+      } catch(e) {
+        setSkusByLote(prev => new Map([...prev, [key, []]]));
+      } finally {
+        setLoadingExpandLotes(prev => { const n = new Set(prev); n.delete(key); return n; });
+      }
+    }
+  };
+
+  const toggleSkuStatus = (sku_alvo: string, filtro_producao: string, grafica_lote: string) => {
+    setSkusSelecionadosStatus(prev => {
+      const exists = prev.some(s => s.sku_alvo === sku_alvo && s.filtro_producao === filtro_producao);
+      if (exists) return prev.filter(s => !(s.sku_alvo === sku_alvo && s.filtro_producao === filtro_producao));
+      return [...prev, { sku_alvo, filtro_producao, grafica: grafica_lote }];
+    });
+  };
+
+  const applyBulkStatus = async () => {
+    if (!bulkStatusValue || skusSelecionadosStatus.length === 0) return;
+    setIsApplyingStatus(true);
+    try {
+      const graficas = [...new Set(skusSelecionadosStatus.map(s => s.grafica))];
+      await Promise.all(graficas.map(g => {
+        const updates = skusSelecionadosStatus.filter(s => s.grafica === g);
+        return fetch('/api/producao/painel', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ grafica: g, updates: updates.map(u => ({ sku_alvo: u.sku_alvo, filtro_producao: u.filtro_producao, status_producao: bulkStatusValue })) })
+        });
+      }));
+      // Optimistic update in local cache
+      setSkusByLote(prev => {
+        const selectedSet = new Set(skusSelecionadosStatus.map(s => `${s.sku_alvo}|${s.filtro_producao}`));
+        const newMap = new Map<string, any[]>();
+        for (const [k, rows] of prev) {
+          newMap.set(k, rows.map(r => selectedSet.has(`${r.sku_alvo}|${r.lote}`) ? { ...r, status_producao: bulkStatusValue } : r));
+        }
+        return newMap;
+      });
+      setSkusSelecionadosStatus([]);
+      setBulkStatusValue('');
+      const count = skusSelecionadosStatus.length;
+      setFeedback({ msg: `${count} SKUs atualizados para "${bulkStatusValue}"`, tipo: 'sucesso' });
+      setTimeout(() => setFeedback({ msg: '', tipo: '' }), 2500);
+    } catch(e) {
+      setFeedback({ msg: 'Erro ao atualizar status.', tipo: 'erro' });
+      setTimeout(() => setFeedback({ msg: '', tipo: '' }), 2500);
+    } finally {
+      setIsApplyingStatus(false);
+    }
+  };
 
   const toggleRoboFiltro = (tipo: 'acabamento' | 'lombada', valor: string) => {
     setRoboFiltros(prev => {
@@ -1055,6 +1125,28 @@ export default function RegistrosTempo() {
         </div>
       )}
 
+      {skusSelecionadosStatus.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-4 border border-slate-700 animate-in slide-in-from-bottom-4">
+          <i className="fas fa-tags text-violet-400"></i>
+          <span className="text-sm font-bold">{skusSelecionadosStatus.length} SKU{skusSelecionadosStatus.length > 1 ? 's' : ''} selecionado{skusSelecionadosStatus.length > 1 ? 's' : ''}</span>
+          <select value={bulkStatusValue} onChange={e => setBulkStatusValue(e.target.value)}
+            className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm font-bold outline-none text-white">
+            <option value="">-- Novo Status --</option>
+            <option value="Em Análise">Em Análise</option>
+            <option value="Aprovada">Aprovada</option>
+            <option value="Em Produção">Em Produção</option>
+            <option value="Produzida">Produzida</option>
+            <option value="Cancelada">Cancelada</option>
+          </select>
+          <button onClick={applyBulkStatus} disabled={!bulkStatusValue || isApplyingStatus}
+            className="bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white font-bold px-5 py-1.5 rounded-lg text-sm transition-colors flex items-center gap-2">
+            {isApplyingStatus ? <><i className="fas fa-spinner fa-spin"></i> Aplicando...</> : <><i className="fas fa-check"></i> Atualizar Status</>}
+          </button>
+          <button onClick={() => { setSkusSelecionadosStatus([]); setBulkStatusValue(''); }}
+            className="text-slate-400 hover:text-white text-sm font-bold">&times;</button>
+        </div>
+      )}
+
       {/* ETAPA 1: TELA INICIAL DE LOTES TOTALMENTE ANALÍTICA */}
       {etapa === 1 && (() => {
         const globalSkus = lotesFiltrados.reduce((acc, l) => acc + (l.total_skus || 0), 0);
@@ -1153,32 +1245,151 @@ export default function RegistrosTempo() {
                   {lotesFiltrados.map((l, i) => {
                     const pendentes = (l.total_skus || 0) - (l.skus_calculados || 0);
                     const isSelected = lotesSelecionados.some(sel => sel.filtro_producao === l.filtro_producao && sel.grafica === l.grafica);
+                    const loteKey = `${l.filtro_producao}|${l.grafica}`;
+                    const isExpanded = expandedLotes.has(loteKey);
+                    const loteSkus = skusByLote.get(loteKey) || [];
+                    const isLoadingExpand = loadingExpandLotes.has(loteKey);
                     return (
-                      <tr key={i} className={`transition-colors ${isSelected ? 'bg-indigo-50/50' : 'hover:bg-blue-50/40'}`}>
-                        <td className="p-3 pl-4 text-center">
-                          <input 
-                            type="checkbox" 
-                            checked={isSelected} 
-                            onChange={() => {
-                              if(isSelected) setLotesSelecionados(prev => prev.filter(sel => sel.filtro_producao !== l.filtro_producao));
-                              else setLotesSelecionados(prev => [...prev, { filtro_producao: l.filtro_producao, grafica: l.grafica }]);
-                            }} 
-                            className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer" 
-                          />
-                        </td>
-                        <td className="p-3 font-mono font-bold text-slate-800 cursor-pointer" onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>{l.filtro_producao}</td>
-                        <td className="p-3 text-slate-600 uppercase text-xs font-bold cursor-pointer" onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>{l.grafica}</td>
-                        <td className="p-3 text-center border-l border-slate-200 font-mono text-slate-700 cursor-pointer" onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>{l.total_skus}</td>
-                        <td className="p-3 text-center font-mono font-bold text-emerald-700 bg-emerald-50/10 cursor-pointer" onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>{l.skus_calculados}</td>
-                        <td className={`p-3 text-center font-mono font-bold bg-amber-50/10 cursor-pointer ${pendentes > 0 ? 'text-amber-600' : 'text-slate-400'}`} onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>{pendentes}</td>
-                        <td className="p-3 text-right font-mono text-slate-600 cursor-pointer" onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>{Number(l.tiragem_total).toLocaleString('pt-BR')}</td>
-                        <td className="p-3 text-center font-mono font-black text-blue-900 bg-blue-50/20 cursor-pointer" onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>{decimalToTime(l.tempo_total_decimal)}</td>
-                        <td className="p-3 text-right pr-4">
-                          <button onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)} className="bg-blue-600 text-white px-4 py-1.5 rounded text-xs font-bold hover:bg-blue-700 shadow-sm transition-colors">
-                            Abrir Fila
-                          </button>
-                        </td>
-                      </tr>
+                      <Fragment key={i}>
+                        <tr className={`transition-colors ${isSelected ? 'bg-indigo-50/50' : 'hover:bg-blue-50/40'}`}>
+                          <td className="p-3 pl-4 text-center">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {
+                                if(isSelected) setLotesSelecionados(prev => prev.filter(sel => sel.filtro_producao !== l.filtro_producao));
+                                else setLotesSelecionados(prev => [...prev, { filtro_producao: l.filtro_producao, grafica: l.grafica }]);
+                              }}
+                              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                            />
+                          </td>
+                          <td className="p-3 font-mono font-bold text-slate-800">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); toggleExpandLote(l.filtro_producao, l.grafica); }}
+                                className="w-5 h-5 rounded border border-slate-300 flex items-center justify-center text-slate-500 hover:bg-slate-100 flex-shrink-0 transition-colors"
+                                title="Expandir SKUs"
+                              >
+                                {isLoadingExpand ? (
+                                  <i className="fas fa-spinner fa-spin text-[9px]"></i>
+                                ) : isExpanded ? (
+                                  <span className="text-[10px] font-black text-violet-600">▼</span>
+                                ) : (
+                                  <span className="text-[10px] text-slate-400">▶</span>
+                                )}
+                              </button>
+                              <span className="cursor-pointer hover:text-blue-700" onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>
+                                {l.filtro_producao}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="p-3 text-slate-600 uppercase text-xs font-bold cursor-pointer" onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>{l.grafica}</td>
+                          <td className="p-3 text-center border-l border-slate-200 font-mono text-slate-700 cursor-pointer" onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>{l.total_skus}</td>
+                          <td className="p-3 text-center font-mono font-bold text-emerald-700 bg-emerald-50/10 cursor-pointer" onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>{l.skus_calculados}</td>
+                          <td className={`p-3 text-center font-mono font-bold bg-amber-50/10 cursor-pointer ${pendentes > 0 ? 'text-amber-600' : 'text-slate-400'}`} onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>{pendentes}</td>
+                          <td className="p-3 text-right font-mono text-slate-600 cursor-pointer" onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>{Number(l.tiragem_total).toLocaleString('pt-BR')}</td>
+                          <td className="p-3 text-center font-mono font-black text-blue-900 bg-blue-50/20 cursor-pointer" onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>{decimalToTime(l.tempo_total_decimal)}</td>
+                          <td className="p-3 text-right pr-4">
+                            <button onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)} className="bg-blue-600 text-white px-4 py-1.5 rounded text-xs font-bold hover:bg-blue-700 shadow-sm transition-colors">
+                              Abrir Fila
+                            </button>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr>
+                            <td colSpan={9} className="p-0 bg-slate-50 border-b border-slate-200">
+                              {isLoadingExpand ? (
+                                <div className="p-4 text-center text-xs text-slate-400 animate-pulse">Carregando SKUs...</div>
+                              ) : loteSkus.length === 0 ? (
+                                <div className="p-4 text-center text-xs text-slate-400">Nenhum SKU encontrado no Gantt para este lote.</div>
+                              ) : (
+                                <table className="w-full text-left border-collapse text-xs">
+                                  <thead className="bg-slate-200 text-[10px] font-bold uppercase text-slate-600">
+                                    <tr>
+                                      <th className="p-2 pl-14 w-10">
+                                        <input type="checkbox"
+                                          checked={loteSkus.every(r => skusSelecionadosStatus.some(s => s.sku_alvo === r.sku_alvo && s.filtro_producao === r.lote))}
+                                          onChange={(e) => {
+                                            if (e.target.checked) {
+                                              setSkusSelecionadosStatus(prev => {
+                                                const toAdd = loteSkus.filter(r => !prev.some(s => s.sku_alvo === r.sku_alvo && s.filtro_producao === r.lote));
+                                                return [...prev, ...toAdd.map(r => ({ sku_alvo: r.sku_alvo, filtro_producao: r.lote, grafica: r.grafica }))];
+                                              });
+                                            } else {
+                                              setSkusSelecionadosStatus(prev => prev.filter(s => s.filtro_producao !== l.filtro_producao));
+                                            }
+                                          }}
+                                          className="w-3.5 h-3.5 accent-violet-600 cursor-pointer rounded"
+                                        />
+                                      </th>
+                                      <th className="p-2">SKU</th>
+                                      <th className="p-2 text-center">Tiragem</th>
+                                      <th className="p-2 text-center">Paginação</th>
+                                      <th className="p-2">Acabamento</th>
+                                      <th className="p-2 text-center">Data Teórica</th>
+                                      <th className="p-2 text-center">Status MES</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-200">
+                                    {loteSkus.map((sku: any, si: number) => {
+                                      const isSkuSelected = skusSelecionadosStatus.some(s => s.sku_alvo === sku.sku_alvo && s.filtro_producao === sku.lote);
+                                      const statusStyle = !sku.status_producao ? 'bg-slate-100 text-slate-500 border-slate-200' :
+                                        sku.status_producao === 'Em Análise' ? 'bg-orange-100 text-orange-800 border-orange-300' :
+                                        sku.status_producao === 'Aprovada' ? 'bg-blue-100 text-blue-800 border-blue-300' :
+                                        sku.status_producao === 'Em Produção' ? 'bg-yellow-100 text-yellow-800 border-yellow-300' :
+                                        sku.status_producao === 'Produzida' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
+                                        sku.status_producao === 'Cancelada' ? 'bg-red-100 text-red-800 border-red-300' :
+                                        'bg-slate-100 text-slate-500 border-slate-200';
+                                      return (
+                                        <tr key={si} className={`transition-colors ${isSkuSelected ? 'bg-violet-50' : 'hover:bg-white'}`}>
+                                          <td className="p-2 pl-14">
+                                            <input type="checkbox" checked={isSkuSelected}
+                                              onChange={() => toggleSkuStatus(sku.sku_alvo, sku.lote, sku.grafica)}
+                                              className="w-3.5 h-3.5 accent-violet-600 cursor-pointer rounded"
+                                            />
+                                          </td>
+                                          <td className="p-2 font-mono font-bold text-slate-800">{sku.sku_alvo}</td>
+                                          <td className="p-2 text-center font-mono text-slate-600">{sku.tiragem ? Number(sku.tiragem).toLocaleString('pt-BR') : '-'}</td>
+                                          <td className="p-2 text-center font-mono text-slate-600">{sku.paginacao || '-'}</td>
+                                          <td className="p-2 text-slate-600 max-w-[140px] truncate" title={sku.acabamento || ''}>{sku.acabamento || '-'}</td>
+                                          <td className="p-2 text-center font-mono text-slate-600">
+                                            {sku.data_teorica ? new Date(sku.data_teorica).toLocaleDateString('pt-BR', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: '2-digit' }) : '-'}
+                                          </td>
+                                          <td className="p-2 text-center">
+                                            <select value={sku.status_producao || ''} onChange={async (e) => {
+                                              const newStatus = e.target.value;
+                                              setSkusByLote(prev => {
+                                                const newMap = new Map(prev);
+                                                const rows = newMap.get(loteKey) || [];
+                                                newMap.set(loteKey, rows.map(r => r.sku_alvo === sku.sku_alvo ? { ...r, status_producao: newStatus } : r));
+                                                return newMap;
+                                              });
+                                              await fetch('/api/producao/painel', {
+                                                method: 'PATCH',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ grafica: sku.grafica, updates: [{ sku_alvo: sku.sku_alvo, filtro_producao: sku.lote, status_producao: newStatus }] })
+                                              });
+                                            }}
+                                              className={`text-[10px] font-bold border rounded px-2 py-0.5 outline-none cursor-pointer ${statusStyle}`}
+                                            >
+                                              <option value="">-- Status --</option>
+                                              <option value="Em Análise">Em Análise</option>
+                                              <option value="Aprovada">Aprovada</option>
+                                              <option value="Em Produção">Em Produção</option>
+                                              <option value="Produzida">Produzida</option>
+                                              <option value="Cancelada">Cancelada</option>
+                                            </select>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </tbody>
