@@ -286,8 +286,6 @@ export async function POST(request) {
         }
 
         if (pai && prontoParaAgendar) {
-          if (pai._isAlc && pai._isPUR) delayCuraMs = 24 * 60 * 60 * 1000;
-
           if (t._isEspiral && pai._isFura) {
             let mqIdPreview = t._isManualEspiral ? 'ESPIRALAR_MANUAL_UNIFIED' : String(t.maquina_id || '').trim();
             const simPreview = simuladores[mqIdPreview] || {};
@@ -578,14 +576,24 @@ export async function POST(request) {
       for (const [, kit] of kitsMap) {
         // Find the latest finish time among all resolved tasks for this kit's SKUs
         let maxFim = null;
+        let precisaCuraPUR = false;
+
         for (const skuCapa of kit.skus) {
           const tarefasDoSku = resolvidasPorSku.get(skuCapa) || [];
           for (const t of tarefasDoSku) {
             const fim = new Date(t.data_fim);
             if (!maxFim || fim > maxFim) maxFim = fim;
+
+            if (t._isPUR) precisaCuraPUR = true;
           }
         }
-        if (!maxFim) continue; // no resolved tasks for this kit's SKUs yet
+
+        if (!maxFim) continue; // Pula se ainda não tem tarefas resolvidas
+
+        // 24h de cura da cola PUR aplicada APENAS antes de embalar/kit
+        if (precisaCuraPUR) {
+          maxFim = new Date(maxFim.getTime() + (24 * 60 * 60 * 1000));
+        }
 
         const dc = kit.dados_calculo;
 
