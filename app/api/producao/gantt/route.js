@@ -352,24 +352,28 @@ export async function POST(request) {
       }
       if (candidatosAptos.length === 0) break;
       
-      const menorTrt = Math.min(...candidatosAptos.map(c => c.trt.getTime()));
-      const JANELA_MS = 2 * 60 * 60 * 1000;
+      const menorAst = Math.min(...candidatosAptos.map(c => c.trt.getTime()));
+
       candidatosAptos.sort((a, b) => {
-        const aTrtMs = a.trt.getTime();
-        const bTrtMs = b.trt.getTime();
-        const aProximo = aTrtMs <= menorTrt + JANELA_MS;
-        const bProximo = bTrtMs <= menorTrt + JANELA_MS;
+        const pA = getPrioridade(a.tarefa.filtro_producao);
+        const pB = getPrioridade(b.tarefa.filtro_producao);
+
+        // Radar VIP: Lotes no TOP 5 de prioridade ganham um "raio de reserva" de 8 horas na máquina.
+        // Lotes normais mantêm a regra estrita de não deixar a máquina ociosa por mais de 1 hora.
+        const janelaA = pA <= 5 ? 8 * 60 * 60 * 1000 : 1 * 60 * 60 * 1000;
+        const janelaB = pB <= 5 ? 8 * 60 * 60 * 1000 : 1 * 60 * 60 * 1000;
+
+        const aProximo = a.trt.getTime() <= menorAst + janelaA;
+        const bProximo = b.trt.getTime() <= menorAst + janelaB;
+
         if (aProximo && bProximo) {
-          const pA = getPrioridade(a.tarefa.filtro_producao);
-          const pB = getPrioridade(b.tarefa.filtro_producao);
           if (pA !== pB) return pA - pB;
-          return aTrtMs - bTrtMs;
+          return a.trt.getTime() - b.trt.getTime();
         }
         if (aProximo && !bProximo) return -1;
         if (!aProximo && bProximo) return 1;
-        if (aTrtMs !== bTrtMs) return aTrtMs - bTrtMs;
-        const pA = getPrioridade(a.tarefa.filtro_producao);
-        const pB = getPrioridade(b.tarefa.filtro_producao);
+
+        if (a.trt.getTime() !== b.trt.getTime()) return a.trt.getTime() - b.trt.getTime();
         return pA - pB;
       });
 
