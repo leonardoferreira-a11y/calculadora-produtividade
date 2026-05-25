@@ -733,9 +733,12 @@ export default function RegistrosTempo() {
     return { maquinaSetupStr: maquinaDobra.setup || '00:00', isRotativa: false, parametros: { velocidade, setupUnitario: maquinaDobra.setup, tiposCadernos, totalFolhas: totalEntradasFolhas }, totais: { entradas: totalEntradasFolhas, setup: decimalToTime(setupTotalDecimal), rodagem: decimalToTime(rodagemDecimal), total: decimalToTime(setupTotalDecimal + rodagemDecimal) } };
   };
 
-  const calcularAlceamento = (maquinaAlceadeira: any, analiseImpressao: any) => {
+  const calcularAlceamento = (maquinaAlceadeira: any, analiseImpressao: any, maquinaImpressao?: any) => {
     if (!maquinaAlceadeira || !analiseImpressao) return null;
-    const totalCadernosImpressos = analiseImpressao.totais.qtd;
+    const _tipoImp = String(maquinaImpressao?.tipo || '').toUpperCase();
+    const _modImp = String(maquinaImpressao?.modelo || '').toUpperCase();
+    const ehDigitalRotativa = (_tipoImp.includes('DIGITAL') && _tipoImp.includes('ROTATIVA')) || (_modImp.includes('DIGITAL') && _modImp.includes('ROTATIVA')) || ((_tipoImp.includes('DIGITAL') || _modImp.includes('DIGITAL')) && (_tipoImp.includes('ROTATIVA') || _modImp.includes('ROTATIVA')));
+    const totalCadernosImpressos = ehDigitalRotativa ? 1 : analiseImpressao.totais.qtd;
     const tiragemProduzida = analiseImpressao.parametros.tiragemProduzida;
     
     let config: any = {};
@@ -755,9 +758,12 @@ export default function RegistrosTempo() {
     return { maquinaSetupStr: maquinaAlceadeira.setup || '00:00', parametros: { gavetas, entradas, totalCadernos: totalCadernosImpressos, velocidade, setupUnitario: maquinaAlceadeira.setup, livrosAlceados: tiragemProduzida }, totais: { setup: decimalToTime(setupTotalDecimal), rodagem: decimalToTime(rodagemDecimal), total: decimalToTime(setupTotalDecimal + rodagemDecimal) } };
   };
 
-  const calcularGrampo = (maquinaGrampo: any, analiseImpressao: any, paginasOS: number = 0) => {
+  const calcularGrampo = (maquinaGrampo: any, analiseImpressao: any, paginasOS: number = 0, maquinaImpressao?: any) => {
     if (!maquinaGrampo || !analiseImpressao) return null;
-    const totalCadernosImpressos = analiseImpressao.totais.qtd;
+    const _tipoImpG = String(maquinaImpressao?.tipo || '').toUpperCase();
+    const _modImpG = String(maquinaImpressao?.modelo || '').toUpperCase();
+    const ehDigitalRotativaG = (_tipoImpG.includes('DIGITAL') && _tipoImpG.includes('ROTATIVA')) || (_modImpG.includes('DIGITAL') && _modImpG.includes('ROTATIVA')) || ((_tipoImpG.includes('DIGITAL') || _modImpG.includes('DIGITAL')) && (_tipoImpG.includes('ROTATIVA') || _modImpG.includes('ROTATIVA')));
+    const totalCadernosImpressos = ehDigitalRotativaG ? 1 : analiseImpressao.totais.qtd;
     const tiragemProduzida = analiseImpressao.parametros.tiragemProduzida;
 
     let config: any = {};
@@ -992,8 +998,8 @@ export default function RegistrosTempo() {
       const resCort = exigeCort ? calcularCorteVinco(mqCorte, resImpEnc, resImpAde, encarteItem) : null;
 
       const resDob = calcularDobra(mqDob, resImp, mqImp, paginas);
-      const resAlc = (acab.includes('LOMBADA') || acab.includes('PUR') || acab.includes('ESPIRAL') || acab.includes('WIRE-O')) ? calcularAlceamento(mqAlc, resImp) : null;
-      const resGra = (acab.includes('CANOA') || acab.includes('GRAMPO')) ? calcularGrampo(mqGra, resImp, paginas) : null;
+      const resAlc = (acab.includes('LOMBADA') || acab.includes('PUR') || acab.includes('ESPIRAL') || acab.includes('WIRE-O')) ? calcularAlceamento(mqAlc, resImp, mqImp) : null;
+      const resGra = (acab.includes('CANOA') || acab.includes('GRAMPO')) ? calcularGrampo(mqGra, resImp, paginas, mqImp) : null;
       const resEsp = (acab.includes('ESPIRAL') || acab.includes('WIRE-O')) ? calcularEspiral(mqFur, mqEspFinal, resImp, Number(item.paginacao), item.lombada) : null;
 
       const payload = {
@@ -1917,11 +1923,11 @@ export default function RegistrosTempo() {
         
         const exigeAlceamento = acabamento.includes('LOMBADA') || acabamento.includes('PUR') || acabamento.includes('ESPIRAL') || acabamento.includes('WIRE-O');
         const maqAlceadeira = maquinasCargadas.find(m => String(m.id) === String(idMaquinaAlceadeira || ''));
-        const analiseAlceamento = exigeAlceamento ? calcularAlceamento(maqAlceadeira, analiseImpressao) : null;
+        const analiseAlceamento = exigeAlceamento ? calcularAlceamento(maqAlceadeira, analiseImpressao, maqImpressao) : null;
 
         const exigeGrampo = acabamento.includes('CANOA') || acabamento.includes('GRAMPO');
         const maqGrampo = maquinasCargadas.find(m => String(m.id) === String(idMaquinaGrampo || ''));
-        const analiseGrampo = exigeGrampo ? calcularGrampo(maqGrampo, analiseImpressao, Number(osAtual.paginacao) || 0) : null;
+        const analiseGrampo = exigeGrampo ? calcularGrampo(maqGrampo, analiseImpressao, Number(osAtual.paginacao) || 0, maqImpressao) : null;
 
         const exigeEspiral = acabamento.includes('ESPIRAL') || acabamento.includes('WIRE-O');
         const maqFuracao = maquinasCargadas.find(m => String(m.id) === String(idMaquinaFuracao || ''));
