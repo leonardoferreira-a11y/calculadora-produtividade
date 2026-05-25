@@ -25,6 +25,8 @@ export default function PortalPCP() {
   const [fileName, setFileName] = useState('');
   const [filterQuery, setFilterQuery] = useState('');
   const [error, setError] = useState('');
+  const [feedback, setFeedback] = useState({ msg: '', tipo: '' });
+  const [isImporting, setIsImporting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = useCallback((file: File | null | undefined) => {
@@ -54,7 +56,30 @@ export default function PortalPCP() {
     ? rows.filter(r => Object.values(r).some(v => String(v).toUpperCase().includes(filterQuery.toUpperCase())))
     : rows;
 
-  const clearData = () => { setHeaders([]); setRows([]); setFileName(''); setFilterQuery(''); setError(''); };
+  const clearData = () => { setHeaders([]); setRows([]); setFileName(''); setFilterQuery(''); setError(''); setFeedback({ msg: '', tipo: '' }); };
+
+  const handleImport = async () => {
+    if (rows.length === 0) return;
+    setIsImporting(true);
+    setFeedback({ msg: '', tipo: '' });
+    try {
+      const res = await fetch('/api/producao/pcp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setFeedback({ msg: data.message, tipo: 'sucesso' });
+      } else {
+        setFeedback({ msg: data.message || 'Erro ao importar.', tipo: 'erro' });
+      }
+    } catch (e: any) {
+      setFeedback({ msg: e.message || 'Erro de rede ao importar.', tipo: 'erro' });
+    } finally {
+      setIsImporting(false);
+    }
+  };
 
   return (
     <div className="w-full relative">
@@ -64,11 +89,18 @@ export default function PortalPCP() {
           <p className="text-gray-600 font-medium mt-1">Visualizador de CSV — sem integrações, 100% client-side</p>
         </div>
         {rows.length > 0 && (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <input type="text" placeholder="Filtrar em todos os campos..." value={filterQuery}
               onChange={e => setFilterQuery(e.target.value)}
               className="border border-slate-200 rounded px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-slate-400 w-56" />
             <span className="text-xs font-mono text-slate-500">{filteredRows.length}/{rows.length} linhas</span>
+            <button
+              onClick={handleImport}
+              disabled={isImporting}
+              className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 border border-blue-700 px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors"
+            >
+              {isImporting ? <><i className="fas fa-spinner fa-spin"></i> Importando...</> : <><i className="fas fa-database"></i> Importar para Banco</>}
+            </button>
             <button onClick={clearData} className="text-xs font-bold text-red-600 border border-red-200 px-3 py-1.5 rounded hover:bg-red-50">
               <i className="fas fa-times mr-1"></i> Limpar
             </button>
@@ -90,6 +122,14 @@ export default function PortalPCP() {
           <input ref={inputRef} type="file" accept=".csv" className="hidden"
             onChange={e => handleFile(e.target.files?.[0])} />
           {error && <p className="mt-4 text-sm font-bold text-red-600"><i className="fas fa-exclamation-circle mr-1"></i>{error}</p>}
+        </div>
+      )}
+
+      {feedback.msg && (
+        <div className={`mb-4 p-3 rounded-lg border flex items-center gap-2 text-sm font-bold ${feedback.tipo === 'sucesso' ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-red-50 border-red-300 text-red-800'}`}>
+          <i className={`fas ${feedback.tipo === 'sucesso' ? 'fa-check-circle text-emerald-600' : 'fa-exclamation-circle text-red-600'}`}></i>
+          <span>{feedback.msg}</span>
+          <button onClick={() => setFeedback({ msg: '', tipo: '' })} className="ml-auto text-xs opacity-60 hover:opacity-100">&times;</button>
         </div>
       )}
 
