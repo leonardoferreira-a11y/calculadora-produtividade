@@ -84,8 +84,24 @@ export async function POST(request) {
         const nomeE = String(t.nome_etapa).toLowerCase();
         const maqT = String(t.maq_tipo).toLowerCase();
         const maqM = String(t.maq_modelo).toLowerCase();
+
+        // PREVENÇÃO DE DUPLO CÁLCULO (MÁQUINAS INLINE ALCEADEIRA + COLADEIRA)
+        let tempoCorrigido = Number(t.tempo_estimado_horas);
+        if (nomeE.includes('cola') && !nomeE.includes('alcead')) {
+            const duplicataInline = resTarefas.rows.some(other =>
+                String(other.sku_alvo).toUpperCase().trim() === String(t.sku_alvo).toUpperCase().trim() &&
+                String(other.nome_etapa).toLowerCase().includes('alcead') &&
+                String(other.maquina_id) === String(t.maquina_id)
+            );
+            // Se já existe Alceamento na mesma máquina, a Cola vira um marco de 1 minuto para não ocupar tempo duplo
+            if (duplicataInline) {
+                tempoCorrigido = 0.016;
+            }
+        }
+
         return {
             ...t,
+            tempo_estimado_horas: tempoCorrigido,
             _skuUp: UPPER_CASE(t.sku_alvo),
             _idUp: UPPER_CASE(t.id),
             _depUp: t.id_dependencia ? UPPER_CASE(t.id_dependencia) : null,
