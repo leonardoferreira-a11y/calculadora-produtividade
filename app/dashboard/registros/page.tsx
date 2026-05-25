@@ -80,6 +80,8 @@ export default function RegistrosTempo() {
   const [skusSelecionadosStatus, setSkusSelecionadosStatus] = useState<Array<{sku_alvo: string, filtro_producao: string, grafica: string}>>([]);
   const [bulkStatusValue, setBulkStatusValue] = useState('');
   const [isApplyingStatus, setIsApplyingStatus] = useState(false);
+  const [loteStatusValue, setLoteStatusValue] = useState('');
+  const [isApplyingLoteStatus, setIsApplyingLoteStatus] = useState(false);
   const [carregandoLotes, setCarregandoLotes] = useState(false);
   const [acaoPendenteMassa, setAcaoPendenteMassa] = useState<'calcular' | 'apagar' | null>(null);
   const [statusProducao, setStatusProducao] = useState('');
@@ -217,8 +219,7 @@ export default function RegistrosTempo() {
       setCapasDoLote(mergedCapas);
       setEncartesDoLote(mergedEncartes);
       setMaquinasCargadas(dadosMaq);
-      setEtapa(2);
-      
+
       setAcaoPendenteMassa(acao);
 
     } catch(e) {
@@ -317,6 +318,41 @@ export default function RegistrosTempo() {
     }
   };
 
+  const applyLoteBulkStatus = async () => {
+    if (!loteStatusValue || lotesSelecionados.length === 0) return;
+    setIsApplyingLoteStatus(true);
+    try {
+      const graficas = [...new Set(lotesSelecionados.map(l => l.grafica))];
+      await Promise.all(graficas.map(g => {
+        const lotes = lotesSelecionados.filter(l => l.grafica === g);
+        return fetch('/api/producao/painel', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ grafica: g, lote_updates: lotes.map(l => ({ filtro_producao: l.filtro_producao, status_producao: loteStatusValue })) })
+        });
+      }));
+      // Optimistic update in local SKU cache
+      setSkusByLote(prev => {
+        const loteSet = new Set(lotesSelecionados.map(l => `${l.filtro_producao}|${l.grafica}`));
+        const newMap = new Map<string, any[]>();
+        for (const [k, rows] of prev) {
+          if (loteSet.has(k)) newMap.set(k, rows.map(r => ({ ...r, status_producao: loteStatusValue })));
+          else newMap.set(k, rows);
+        }
+        return newMap;
+      });
+      const count = lotesSelecionados.length;
+      setLoteStatusValue('');
+      setFeedback({ msg: `${count} lote(s) atualizados para "${loteStatusValue}"`, tipo: 'sucesso' });
+      setTimeout(() => { setFeedback({ msg: '', tipo: '' }); carregarFiltrosIniciais(); }, 2500);
+    } catch(e) {
+      setFeedback({ msg: 'Erro ao atualizar status dos lotes.', tipo: 'erro' });
+      setTimeout(() => setFeedback({ msg: '', tipo: '' }), 2500);
+    } finally {
+      setIsApplyingLoteStatus(false);
+    }
+  };
+
   const toggleRoboFiltro = (tipo: 'acabamento' | 'lombada', valor: string) => {
     setRoboFiltros(prev => {
       const atual = prev[tipo];
@@ -375,6 +411,12 @@ export default function RegistrosTempo() {
          if (filtradas.length > 0) candidatas = filtradas;
     }
 
+    if (grafica === 'MAXI') {
+      return candidatas.sort((a, b) => {
+        const cfg = (m: any) => { try { return typeof m.configuracoes === 'string' ? JSON.parse(m.configuracoes) : (m.configuracoes || {}); } catch(e) { return {}; } };
+        return (Number(b.produtividade_unit || 0) * (Number(cfg(b).pgs_caderno) || 1)) - (Number(a.produtividade_unit || 0) * (Number(cfg(a).pgs_caderno) || 1));
+      })[0];
+    }
     return candidatas.sort((a, b) => Number(b.produtividade_unit || 0) - Number(a.produtividade_unit || 0))[0];
   };
 
@@ -384,6 +426,7 @@ export default function RegistrosTempo() {
         const t = String(m.tipo || '').toUpperCase();
         const mod = String(m.modelo || '').toUpperCase();
         if (isPUR) return t.includes('COLADEIRA') || t.includes('PUR') || mod.includes('PUR');
+        if (grafica === 'IMOS' && !isPUR && mod.includes('MULLER')) return false;
         return t.includes('ALCEADEIRA') && !t.includes('COLADEIRA') && !t.includes('PUR');
     });
     
@@ -552,8 +595,9 @@ export default function RegistrosTempo() {
 
     const setupTotalDec = totalSetups * setupUnitario;
     const rodagemDec = totalGiros / velocidade;
+    const totalImpCapaDec = grafica === 'IMOS' ? Math.max(setupTotalDec + rodagemDec, 1.75) : setupTotalDec + rodagemDec;
 
-    return { maquinaSetupStr: maquina.setup || '00:00', parametros: { velocidade, setups: totalSetups, giros: totalGiros }, linhas, totais: { setup: decimalToTime(setupTotalDec), rodagem: decimalToTime(rodagemDec), total: decimalToTime(setupTotalDec + rodagemDec) } };
+    return { maquinaSetupStr: maquina.setup || '00:00', parametros: { velocidade, setups: totalSetups, giros: totalGiros }, linhas, totais: { setup: decimalToTime(setupTotalDec), rodagem: decimalToTime(rodagemDec), total: decimalToTime(totalImpCapaDec) } };
   };
 
   const calcularBeneficiamentoCapa = (maquina: any, capas: any[], tiragemOS: number, maqImpCapaOrigem: any) => {
@@ -573,7 +617,7 @@ export default function RegistrosTempo() {
         const tipo = String(capa.tipo_capa || '').toUpperCase();
 
         const poses = tipo.includes('DURA') ? 2 : 4;
-        const folhas = Math.ceil(tiragemProduzida / poses);
+        const folhas = grafica === 'IMOS' ? Math.ceil(tiragemProduzida / 2) : Math.ceil(tiragemProduzida / poses);
 
         totalFolhas += folhas;
         totalSetups += 1;
@@ -668,7 +712,7 @@ export default function RegistrosTempo() {
     return { maquinaSetupStr: maquina.setup || '00:00', parametros: { velocidade, totalFolhas, setups }, linhas, totais: { setup: decimalToTime(setupTotalDec), rodagem: decimalToTime(rodagemDec), total: decimalToTime(setupTotalDec + rodagemDec) } };
   };
 
-  const calcularDobra = (maquinaDobra: any, analiseImpressao: any, maquinaImpressaoSelecionada: any) => {
+  const calcularDobra = (maquinaDobra: any, analiseImpressao: any, maquinaImpressaoSelecionada: any, paginasOS: number = 0) => {
     if (!maquinaDobra || !analiseImpressao || !maquinaImpressaoSelecionada) return null;
     const ehRotativa = String(maquinaImpressaoSelecionada.modelo || '').toUpperCase().includes('ROTATIVA') || String(maquinaImpressaoSelecionada.tecnologia || '').toUpperCase().includes('ROTATIVA');
     if (ehRotativa) return { isRotativa: true, totais: { entradas: 0, setup: '00:00', rodagem: '00:00', total: '00:00' } };
@@ -676,7 +720,13 @@ export default function RegistrosTempo() {
     const tiragemProduzida = analiseImpressao.parametros.tiragemProduzida;
     const totalCadernos = analiseImpressao.totais.qtd;
     const tiposCadernos = (analiseImpressao.parametros.cadernosInteiros > 0 ? 1 : 0) + (analiseImpressao.parametros.paginasRestantes > 0 ? 1 : 0);
-    const totalEntradasFolhas = totalCadernos * tiragemProduzida;
+    const isManualDobra = String(maquinaDobra.modelo || '').toUpperCase().includes('MANUAL');
+    let totalEntradasFolhas = totalCadernos * tiragemProduzida;
+    if (grafica === 'REPROSET' && isManualDobra) {
+      totalEntradasFolhas = tiragemProduzida;
+    } else if (grafica === 'MAXI' && isManualDobra) {
+      totalEntradasFolhas = Math.ceil((paginasOS / 4) * tiragemProduzida);
+    }
     const velocidade = Number(maquinaDobra.produtividade_unit) || 1;
     const setupTotalDecimal = timeToDecimal(maquinaDobra.setup || '00:00') * tiposCadernos;
     const rodagemDecimal = totalEntradasFolhas / velocidade;
@@ -705,26 +755,28 @@ export default function RegistrosTempo() {
     return { maquinaSetupStr: maquinaAlceadeira.setup || '00:00', parametros: { gavetas, entradas, totalCadernos: totalCadernosImpressos, velocidade, setupUnitario: maquinaAlceadeira.setup, livrosAlceados: tiragemProduzida }, totais: { setup: decimalToTime(setupTotalDecimal), rodagem: decimalToTime(rodagemDecimal), total: decimalToTime(setupTotalDecimal + rodagemDecimal) } };
   };
 
-  const calcularGrampo = (maquinaGrampo: any, analiseImpressao: any) => {
+  const calcularGrampo = (maquinaGrampo: any, analiseImpressao: any, paginasOS: number = 0) => {
     if (!maquinaGrampo || !analiseImpressao) return null;
     const totalCadernosImpressos = analiseImpressao.totais.qtd;
     const tiragemProduzida = analiseImpressao.parametros.tiragemProduzida;
-    
+
     let config: any = {};
     try {
         if (typeof maquinaGrampo.configuracoes === 'string') config = JSON.parse(maquinaGrampo.configuracoes);
         else if (maquinaGrampo.configuracoes) config = maquinaGrampo.configuracoes;
     } catch(e) {}
-    
-    const gavetas = Number(config.gavetas) || 1; 
+
+    const gavetas = Number(config.gavetas) || 1;
     const velocidade = Number(maquinaGrampo.produtividade_unit) || 1;
     const setupUnitarioDecimal = timeToDecimal(maquinaGrampo.setup || '00:00');
     const entradas = Math.ceil(totalCadernosImpressos / gavetas);
     const setupTotalDecimal = setupUnitarioDecimal * entradas;
-    
+
     const rodagemDecimal = (tiragemProduzida * entradas) / velocidade;
-    
-    return { maquinaSetupStr: maquinaGrampo.setup || '00:00', parametros: { gavetas, entradas, totalCadernos: totalCadernosImpressos, velocidade, setupUnitario: maquinaGrampo.setup, livrosGrampeados: tiragemProduzida }, totais: { setup: decimalToTime(setupTotalDecimal), rodagem: decimalToTime(rodagemDecimal), total: decimalToTime(setupTotalDecimal + rodagemDecimal) } };
+    const totalDecimal = setupTotalDecimal + rodagemDecimal;
+    const totalFinalDecimal = grafica === 'IMOS' && paginasOS > 84 ? totalDecimal * 2 : totalDecimal;
+
+    return { maquinaSetupStr: maquinaGrampo.setup || '00:00', parametros: { gavetas, entradas, totalCadernos: totalCadernosImpressos, velocidade, setupUnitario: maquinaGrampo.setup, livrosGrampeados: tiragemProduzida }, totais: { setup: decimalToTime(setupTotalDecimal), rodagem: decimalToTime(rodagemDecimal), total: decimalToTime(totalFinalDecimal) } };
   };
 
   const calcularEspiral = (maquinaFuracao: any, maquinaEspiral: any, analiseImpressao: any, paginasLivro: number, lombada_mm: any) => {
@@ -891,9 +943,14 @@ export default function RegistrosTempo() {
       const mqImpCapa = robo.impressaoCapa ? maquinasCargadas.find(m => String(m.id) === robo.impressaoCapa) : getMaquinaIdeal('Impressão', techCapa);
       const mqBenCapa = robo.benefCapa ? maquinasCargadas.find(m => String(m.id) === robo.benefCapa) : getMaquinaMaisRapida('Beneficiamento');
       const mqEmpCapa = robo.empastCapa ? maquinasCargadas.find(m => String(m.id) === robo.empastCapa) : getMaquinaMaisRapida('Empastamento', 'Capa Dura');
-      const mqDob = robo.dobra ? maquinasCargadas.find(m => String(m.id) === robo.dobra) : getMaquinaMaisRapida('Dobra');
-      
+      let mqDob = robo.dobra ? maquinasCargadas.find(m => String(m.id) === robo.dobra) : getMaquinaMaisRapida('Dobra');
       const acab = String(item.acabamento || '').toUpperCase();
+
+      // REPROSET: Digital Rotativa + Canoa/Grampo → force MANUAL dobradeira
+      if (grafica.toUpperCase() === 'REPROSET' && techMiolo === 'ROTATIVA - DIGITAL' && (acab.includes('CANOA') || acab.includes('GRAMPO'))) {
+        const mqManual = maquinasCargadas.find(m => String(m.tipo || '').toUpperCase().includes('DOBRA') && String(m.modelo || '').toUpperCase().includes('MANUAL'));
+        if (mqManual) mqDob = mqManual;
+      }
       let mqAlc = null;
       
       if (robo.alceadeira) {
@@ -934,9 +991,9 @@ export default function RegistrosTempo() {
       const exigeCort = encarteItem && (String(encarteItem.corte_vinco_encarte || '').toLowerCase() === 'sim' || String(encarteItem.corte_vinco_adesivo || '').toLowerCase() === 'sim');
       const resCort = exigeCort ? calcularCorteVinco(mqCorte, resImpEnc, resImpAde, encarteItem) : null;
 
-      const resDob = calcularDobra(mqDob, resImp, mqImp);
+      const resDob = calcularDobra(mqDob, resImp, mqImp, paginas);
       const resAlc = (acab.includes('LOMBADA') || acab.includes('PUR') || acab.includes('ESPIRAL') || acab.includes('WIRE-O')) ? calcularAlceamento(mqAlc, resImp) : null;
-      const resGra = (acab.includes('CANOA') || acab.includes('GRAMPO')) ? calcularGrampo(mqGra, resImp) : null;
+      const resGra = (acab.includes('CANOA') || acab.includes('GRAMPO')) ? calcularGrampo(mqGra, resImp, paginas) : null;
       const resEsp = (acab.includes('ESPIRAL') || acab.includes('WIRE-O')) ? calcularEspiral(mqFur, mqEspFinal, resImp, Number(item.paginacao), item.lombada) : null;
 
       const payload = {
@@ -1206,14 +1263,29 @@ export default function RegistrosTempo() {
                 <span className="font-black text-indigo-100 uppercase text-sm tracking-wide">
                   <i className="fas fa-layer-group mr-2 text-indigo-400"></i> {lotesSelecionados.length} Lotes Selecionados para Ação Múltipla
                 </span>
-                <div className="flex gap-3">
-                  <button 
+                <div className="flex gap-3 items-center">
+                  <select value={loteStatusValue} onChange={e => setLoteStatusValue(e.target.value)}
+                    className="bg-indigo-800 border border-indigo-600 rounded px-3 py-2 text-sm font-bold outline-none text-indigo-100 cursor-pointer">
+                    <option value="">-- Status do Lote --</option>
+                    <option value="Em Análise">Em Análise</option>
+                    <option value="Aprovada">Aprovada</option>
+                    <option value="Em Produção">Em Produção</option>
+                    <option value="Produzida">Produzida</option>
+                    <option value="Cancelada">Cancelada</option>
+                  </select>
+                  <button
+                    onClick={applyLoteBulkStatus}
+                    disabled={!loteStatusValue || isApplyingLoteStatus}
+                    className="bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white font-bold px-4 py-2 rounded text-xs transition-colors flex items-center gap-2 uppercase tracking-wide">
+                    {isApplyingLoteStatus ? <><i className="fas fa-spinner fa-spin"></i> Aplicando...</> : <><i className="fas fa-tags"></i> Atualizar Status</>}
+                  </button>
+                  <button
                     onClick={() => processarLotesPorFora('apagar')}
                     disabled={carregandoLotes}
                     className="bg-transparent border border-indigo-400 text-indigo-100 hover:bg-red-600 hover:border-red-600 hover:text-white font-bold px-4 py-2 rounded text-xs transition-colors flex items-center gap-2 disabled:opacity-50">
                     <i className="fas fa-eraser"></i> Apagar Cálculos
                   </button>
-                  <button 
+                  <button
                     onClick={() => processarLotesPorFora('calcular')}
                     disabled={carregandoLotes}
                     className="bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-black px-6 py-2 rounded shadow text-xs transition-colors flex items-center gap-2 uppercase tracking-wide disabled:opacity-50">
@@ -1326,7 +1398,7 @@ export default function RegistrosTempo() {
                                       <th className="p-2 text-center">Tiragem</th>
                                       <th className="p-2 text-center">Paginação</th>
                                       <th className="p-2">Acabamento</th>
-                                      <th className="p-2 text-center">Data Teórica</th>
+                                      <th className="p-2">Descrição</th>
                                       <th className="p-2 text-center">Status MES</th>
                                     </tr>
                                   </thead>
@@ -1352,9 +1424,7 @@ export default function RegistrosTempo() {
                                           <td className="p-2 text-center font-mono text-slate-600">{sku.tiragem ? Number(sku.tiragem).toLocaleString('pt-BR') : '-'}</td>
                                           <td className="p-2 text-center font-mono text-slate-600">{sku.paginacao || '-'}</td>
                                           <td className="p-2 text-slate-600 max-w-[140px] truncate" title={sku.acabamento || ''}>{sku.acabamento || '-'}</td>
-                                          <td className="p-2 text-center font-mono text-slate-600">
-                                            {sku.data_teorica ? new Date(sku.data_teorica).toLocaleDateString('pt-BR', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: '2-digit' }) : '-'}
-                                          </td>
+                                          <td className="p-2 text-slate-500 max-w-[180px] truncate text-[11px]" title={sku.descricao || ''}>{sku.descricao || '-'}</td>
                                           <td className="p-2 text-center">
                                             <select value={sku.status_producao || ''} onChange={async (e) => {
                                               const newStatus = e.target.value;
@@ -1841,7 +1911,7 @@ export default function RegistrosTempo() {
         const analiseCorteVinco = exigeCorteVinco ? calcularCorteVinco(maqCorteVinco, analiseImpEncarte, analiseImpAdesivo, encarteItem) : null;
 
         const maqDobra = maquinasCargadas.find(m => String(m.id) === String(idMaquinaDobra || ''));
-        const analiseDobra = calcularDobra(maqDobra, analiseImpressao, maqImpressao);
+        const analiseDobra = calcularDobra(maqDobra, analiseImpressao, maqImpressao, Number(osAtual.paginacao) || 0);
 
         const acabamento = String(osAtual.acabamento || '').toUpperCase();
         
@@ -1851,7 +1921,7 @@ export default function RegistrosTempo() {
 
         const exigeGrampo = acabamento.includes('CANOA') || acabamento.includes('GRAMPO');
         const maqGrampo = maquinasCargadas.find(m => String(m.id) === String(idMaquinaGrampo || ''));
-        const analiseGrampo = exigeGrampo ? calcularGrampo(maqGrampo, analiseImpressao) : null;
+        const analiseGrampo = exigeGrampo ? calcularGrampo(maqGrampo, analiseImpressao, Number(osAtual.paginacao) || 0) : null;
 
         const exigeEspiral = acabamento.includes('ESPIRAL') || acabamento.includes('WIRE-O');
         const maqFuracao = maquinasCargadas.find(m => String(m.id) === String(idMaquinaFuracao || ''));

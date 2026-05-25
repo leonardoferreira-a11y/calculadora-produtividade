@@ -27,7 +27,8 @@ export async function GET(request) {
          MAX(t.data_fim)    AS data_prazo,
          MAX(pm.tiragem)    AS tiragem,
          MAX(pm.paginacao)  AS paginacao,
-         MAX(pm.acabamento) AS acabamento
+         MAX(pm.acabamento) AS acabamento,
+         MAX(pm.descricao)  AS descricao
        FROM gantt_tarefas t
        LEFT JOIN prod_miolo pm
          ON UPPER(TRIM(t.sku_alvo)) = UPPER(TRIM(pm.sku_miolo))
@@ -45,12 +46,27 @@ export async function GET(request) {
   }
 }
 
-// PATCH — bulk update status for multiple SKUs
+// PATCH — bulk update status
 // Body: { grafica, updates: [{ sku_alvo, filtro_producao, status_producao }] }
+//    OR: { grafica, lote_updates: [{ filtro_producao, status_producao }] }
 export async function PATCH(request) {
   try {
-    const { grafica, updates } = await request.json();
-    if (!grafica || !Array.isArray(updates) || updates.length === 0) {
+    const { grafica, updates, lote_updates } = await request.json();
+    if (!grafica) return NextResponse.json({ message: 'Parâmetros inválidos.' }, { status: 400 });
+
+    if (Array.isArray(lote_updates) && lote_updates.length > 0) {
+      await Promise.all(lote_updates.map(u =>
+        pool.query(
+          `UPDATE gantt_tarefas SET status_producao = $1
+           WHERE UPPER(TRIM(filtro_producao)) = UPPER(TRIM($2))
+             AND UPPER(TRIM(grafica)) = UPPER(TRIM($3))`,
+          [u.status_producao || null, u.filtro_producao, grafica]
+        )
+      ));
+      return NextResponse.json({ message: `${lote_updates.length} lote(s) atualizados.` });
+    }
+
+    if (!Array.isArray(updates) || updates.length === 0) {
       return NextResponse.json({ message: 'Parâmetros inválidos.' }, { status: 400 });
     }
     await Promise.all(updates.map(u =>
