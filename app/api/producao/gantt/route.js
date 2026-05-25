@@ -352,28 +352,38 @@ export async function POST(request) {
       }
       if (candidatosAptos.length === 0) break;
       
-      const menorAst = Math.min(...candidatosAptos.map(c => c.trt.getTime()));
+      // 1. Calcula o Início Real (AST - Actual Start Time) cruzando TRT com a fila atual da máquina
+      candidatosAptos.forEach(c => {
+        let mqId = String(c.tarefa.maquina_id || '').trim();
+        if (c.tarefa._isManualEspiral) mqId = 'ESPIRALAR_MANUAL_UNIFIED';
+
+        let machineFreeTime = controleMaquinasFim[mqId] ? Math.min(...controleMaquinasFim[mqId].map(d => d.getTime())) : 0;
+        c.ast = Math.max(c.trt.getTime(), machineFreeTime);
+      });
+
+      const menorAst = Math.min(...candidatosAptos.map(c => c.ast));
+      const JANELA_MS = 2 * 60 * 60 * 1000; // Retorna para 2 horas de tolerância máxima de ociosidade
 
       candidatosAptos.sort((a, b) => {
-        const pA = getPrioridade(a.tarefa.filtro_producao);
-        const pB = getPrioridade(b.tarefa.filtro_producao);
+        const aProximo = a.ast <= menorAst + JANELA_MS;
+        const bProximo = b.ast <= menorAst + JANELA_MS;
 
-        // Radar VIP: Lotes no TOP 5 de prioridade ganham um "raio de reserva" de 8 horas na máquina.
-        // Lotes normais mantêm a regra estrita de não deixar a máquina ociosa por mais de 1 hora.
-        const janelaA = pA <= 5 ? 8 * 60 * 60 * 1000 : 1 * 60 * 60 * 1000;
-        const janelaB = pB <= 5 ? 8 * 60 * 60 * 1000 : 1 * 60 * 60 * 1000;
-
-        const aProximo = a.trt.getTime() <= menorAst + janelaA;
-        const bProximo = b.trt.getTime() <= menorAst + janelaB;
-
+        // Se ambos entram na máquina em horários próximos, a Prioridade VIP dita a regra de forma absoluta
         if (aProximo && bProximo) {
+          const pA = getPrioridade(a.tarefa.filtro_producao);
+          const pB = getPrioridade(b.tarefa.filtro_producao);
           if (pA !== pB) return pA - pB;
-          return a.trt.getTime() - b.trt.getTime();
+          return a.ast - b.ast;
         }
+
         if (aProximo && !bProximo) return -1;
         if (!aProximo && bProximo) return 1;
 
-        if (a.trt.getTime() !== b.trt.getTime()) return a.trt.getTime() - b.trt.getTime();
+        if (a.ast !== b.ast) return a.ast - b.ast;
+
+        // Desempate final
+        const pA = getPrioridade(a.tarefa.filtro_producao);
+        const pB = getPrioridade(b.tarefa.filtro_producao);
         return pA - pB;
       });
 
