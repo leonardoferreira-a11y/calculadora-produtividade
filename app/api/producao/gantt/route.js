@@ -257,6 +257,7 @@ export async function POST(request) {
         let prontoParaAgendar = true;
         let pai = null;
         let delayCuraMs = 0;
+        const nomeE = String(t.nome_etapa).toLowerCase();
 
         if (t._depUp) {
           pai = resolvidasMap.get(t._depUp);
@@ -333,24 +334,26 @@ export async function POST(request) {
           prontoParaAgendar = false;
         }
 
-        // Parallel sync: Acabamento Final must wait for Beneficiamento (capa) + Corte e Vinco (inserts)
-        if (prontoParaAgendar && t._isAlc) {
+        // Sincronismo Paralelo Blindado (Gathering Node):
+        // O Acabamento Final DEVE aguardar o término de TODAS as Impressões (Miolo/Capa/Encarte), Dobras, Beneficiamentos e Cortes do mesmo SKU.
+        const isAcabamentoFinal = t._isAlc || nomeE.includes('grampo') || nomeE.includes('canoa');
+        if (prontoParaAgendar && isAcabamentoFinal) {
           const skuResolvidas = resolvidasPorSku.get(t._skuUp) || [];
           const skuIndef = indefinitasPorSku.get(t._skuUp) || [];
-          const beneficPendente = skuIndef.some(r => {
+
+          // Etapas que obrigatoriamente precisam terminar ANTES do acabamento final do livro
+          const pendenteBase = skuIndef.some(r => {
             const n = String(r.nome_etapa).toLowerCase();
-            return n.includes('benefic') || n.includes('laminac');
+            return n.includes('benefic') || n.includes('laminac') || n.includes('corte') || n.includes('vinco') || n.includes('impress') || n.includes('dobra');
           });
-          const corteVincoPendente = skuIndef.some(r => {
-            const n = String(r.nome_etapa).toLowerCase();
-            return n.includes('corte') || n.includes('vinco');
-          });
-          if (beneficPendente || corteVincoPendente) {
-            prontoParaAgendar = false;
+
+          if (pendenteBase) {
+            prontoParaAgendar = false; // Bloqueia o acabamento na fila
           } else {
+            // Se tudo já acabou, o TRT real passa a ser a data de término da etapa mais demorada
             for (const r of skuResolvidas) {
               const n = String(r.nome_etapa).toLowerCase();
-              if (n.includes('benefic') || n.includes('laminac') || n.includes('corte') || n.includes('vinco')) {
+              if (n.includes('benefic') || n.includes('laminac') || n.includes('corte') || n.includes('vinco') || n.includes('impress') || n.includes('dobra')) {
                 const fim = new Date(r.data_fim);
                 if (fim > tempoProntidaoTecnica) tempoProntidaoTecnica = fim;
               }
