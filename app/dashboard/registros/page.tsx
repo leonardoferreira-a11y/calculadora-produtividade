@@ -738,9 +738,9 @@ export default function RegistrosTempo() {
     const _tipoImp = String(maquinaImpressao?.tipo || '').toUpperCase();
     const _modImp = String(maquinaImpressao?.modelo || '').toUpperCase();
     const ehDigitalRotativa = (_tipoImp.includes('DIGITAL') && _tipoImp.includes('ROTATIVA')) || (_modImp.includes('DIGITAL') && _modImp.includes('ROTATIVA')) || ((_tipoImp.includes('DIGITAL') || _modImp.includes('DIGITAL')) && (_tipoImp.includes('ROTATIVA') || _modImp.includes('ROTATIVA')));
-    const totalCadernosImpressos = ehDigitalRotativa ? 1 : analiseImpressao.totais.qtd;
+    const totalCadernosImpressos = (ehDigitalRotativa && String(grafica || '').toUpperCase() !== 'LOGPRINT') ? 1 : analiseImpressao.totais.qtd;
     const tiragemProduzida = analiseImpressao.parametros.tiragemProduzida;
-    
+
     let config: any = {};
     try {
         if (typeof maquinaAlceadeira.configuracoes === 'string') config = JSON.parse(maquinaAlceadeira.configuracoes);
@@ -763,7 +763,7 @@ export default function RegistrosTempo() {
     const _tipoImpG = String(maquinaImpressao?.tipo || '').toUpperCase();
     const _modImpG = String(maquinaImpressao?.modelo || '').toUpperCase();
     const ehDigitalRotativaG = (_tipoImpG.includes('DIGITAL') && _tipoImpG.includes('ROTATIVA')) || (_modImpG.includes('DIGITAL') && _modImpG.includes('ROTATIVA')) || ((_tipoImpG.includes('DIGITAL') || _modImpG.includes('DIGITAL')) && (_tipoImpG.includes('ROTATIVA') || _modImpG.includes('ROTATIVA')));
-    const totalCadernosImpressos = ehDigitalRotativaG ? 1 : analiseImpressao.totais.qtd;
+    const totalCadernosImpressos = (ehDigitalRotativaG && String(grafica || '').toUpperCase() !== 'LOGPRINT') ? 1 : analiseImpressao.totais.qtd;
     const tiragemProduzida = analiseImpressao.parametros.tiragemProduzida;
 
     let config: any = {};
