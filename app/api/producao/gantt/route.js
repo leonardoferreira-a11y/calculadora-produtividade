@@ -334,26 +334,47 @@ export async function POST(request) {
           prontoParaAgendar = false;
         }
 
+        // Barreira do Empastamento: Só pode iniciar após a Laminação/Beneficiamento da capa
+        if (prontoParaAgendar && nomeE.includes('empast')) {
+          const skuResolvidas = resolvidasPorSku.get(t._skuUp) || [];
+          const skuIndef = indefinitasPorSku.get(t._skuUp) || [];
+
+          const capaPendente = skuIndef.some(r => {
+            const n = String(r.nome_etapa).toLowerCase();
+            return n.includes('benefic') || n.includes('laminac') || (n.includes('impress') && n.includes('capa'));
+          });
+
+          if (capaPendente) {
+            prontoParaAgendar = false;
+          } else {
+            for (const r of skuResolvidas) {
+              const n = String(r.nome_etapa).toLowerCase();
+              if (n.includes('benefic') || n.includes('laminac') || (n.includes('impress') && n.includes('capa'))) {
+                const fim = new Date(r.data_fim);
+                if (fim > tempoProntidaoTecnica) tempoProntidaoTecnica = fim;
+              }
+            }
+          }
+        }
+
         // Sincronismo Paralelo Blindado (Gathering Node):
-        // O Acabamento Final DEVE aguardar o término de TODAS as Impressões (Miolo/Capa/Encarte), Dobras, Beneficiamentos e Cortes do mesmo SKU.
-        const isAcabamentoFinal = t._isAlc || nomeE.includes('grampo') || nomeE.includes('canoa');
+        // O Acabamento Final aguarda o término de TODAS as preparações, INCLUSIVE o Empastamento.
+        const isAcabamentoFinal = t._isAlc || nomeE.includes('grampo') || nomeE.includes('canoa') || t._isFura || t._isEspiral;
         if (prontoParaAgendar && isAcabamentoFinal) {
           const skuResolvidas = resolvidasPorSku.get(t._skuUp) || [];
           const skuIndef = indefinitasPorSku.get(t._skuUp) || [];
 
-          // Etapas que obrigatoriamente precisam terminar ANTES do acabamento final do livro
           const pendenteBase = skuIndef.some(r => {
             const n = String(r.nome_etapa).toLowerCase();
-            return n.includes('benefic') || n.includes('laminac') || n.includes('corte') || n.includes('vinco') || n.includes('impress') || n.includes('dobra');
+            return n.includes('benefic') || n.includes('laminac') || n.includes('corte') || n.includes('vinco') || n.includes('impress') || n.includes('dobra') || n.includes('empast');
           });
 
           if (pendenteBase) {
-            prontoParaAgendar = false; // Bloqueia o acabamento na fila
+            prontoParaAgendar = false;
           } else {
-            // Se tudo já acabou, o TRT real passa a ser a data de término da etapa mais demorada
             for (const r of skuResolvidas) {
               const n = String(r.nome_etapa).toLowerCase();
-              if (n.includes('benefic') || n.includes('laminac') || n.includes('corte') || n.includes('vinco') || n.includes('impress') || n.includes('dobra')) {
+              if (n.includes('benefic') || n.includes('laminac') || n.includes('corte') || n.includes('vinco') || n.includes('impress') || n.includes('dobra') || n.includes('empast')) {
                 const fim = new Date(r.data_fim);
                 if (fim > tempoProntidaoTecnica) tempoProntidaoTecnica = fim;
               }
@@ -523,6 +544,11 @@ export async function POST(request) {
         _isAlc: tarefa._isAlc,
         is_antecipacao: tarefa.is_antecipacao || false
       };
+
+      // Força a palavra 'Capa' no nome da etapa de empastamento para o Front-end agrupar na cor e categoria corretas
+      if (String(novaResolvida.nome_etapa).toLowerCase().includes('empast') && !String(novaResolvida.nome_etapa).toLowerCase().includes('capa')) {
+          novaResolvida.nome_etapa = novaResolvida.nome_etapa + ' de Capa';
+      }
 
       tarefasResolvidas.push(novaResolvida);
       resolvidasMap.set(tarefa._idUp, novaResolvida);
