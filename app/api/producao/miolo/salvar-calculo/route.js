@@ -46,12 +46,14 @@ export async function POST(request) {
     const mapaEtapas = [
       { chaves: ['impressao', 'impressao_miolo', 'impressaoPlana'], nome: 'Impressão', idStr: 'IMP' },
       { chaves: ['impressao_capa'], nome: 'Impressão Capa', idStr: 'IMP_CAPA' },
+      { chaves: ['impressao_encarte'], nome: 'Impressão Encarte', idStr: 'IMP_ENCARTE' },
+      { chaves: ['impressao_adesivo'], nome: 'Impressão Adesivo', idStr: 'IMP_ADESIVO' },
       { chaves: ['beneficiamento_capa', 'beneficiamento', 'laminacao'], nome: 'Beneficiamento', idStr: 'BENEF' },
       { chaves: ['empastamento_capa', 'empastamento'], nome: 'Empastamento Capa', idStr: 'EMPA' },
       { chaves: ['corte', 'corte_vinco', 'corte_e_vinco', 'corteVinco'], nome: 'Corte e Vinco', idStr: 'CORTE' },
       { chaves: ['dobra', 'dobra_miolo'], nome: 'Dobra', idStr: 'DOB' },
       { chaves: ['cola', 'lombada', 'colagem', 'hotmelt'], nome: 'Lombada / Cola', idStr: 'COLA' },
-      { chaves: ['alceadeira', 'alceamento'], nome: 'Alceadeira', idStr: 'ALC' }, 
+      { chaves: ['alceadeira', 'alceamento'], nome: 'Alceadeira', idStr: 'ALC' },
       { chaves: ['grampo', 'canoa'], nome: 'Grampo / Canoa', idStr: 'GRA' },
       { chaves: ['shrink', 'plastificacao', 'shrinkEmbalagem'], nome: 'Shrink', idStr: 'SHRINK' },
       { chaves: ['encaixotamento', 'caixa', 'fechamento_caixa'], nome: 'Encaixotamento', idStr: 'BOX' }
@@ -93,8 +95,8 @@ export async function POST(request) {
 
     // 2.1 Processamento Padrão de Chaves Simples
     for (const etapa of mapaEtapas) {
-      const chaveEncontrada = Object.keys(dados_calculo).find(chaveDoJson => 
-        etapa.chaves.some(chaveDoMapa => chaveDoJson.toLowerCase().includes(chaveDoMapa.toLowerCase()))
+      const chaveEncontrada = Object.keys(dados_calculo).find(chaveDoJson =>
+        etapa.chaves.some(chaveDoMapa => chaveDoJson.toLowerCase() === chaveDoMapa.toLowerCase())
       );
       
       if (chaveEncontrada) {
