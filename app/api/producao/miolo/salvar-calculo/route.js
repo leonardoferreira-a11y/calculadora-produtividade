@@ -47,6 +47,7 @@ export async function POST(request) {
       { chaves: ['impressao', 'impressao_miolo', 'impressaoPlana'], nome: 'Impressão', idStr: 'IMP' },
       { chaves: ['impressao_capa'], nome: 'Impressão Capa', idStr: 'IMP_CAPA' },
       { chaves: ['beneficiamento_capa', 'beneficiamento', 'laminacao'], nome: 'Beneficiamento', idStr: 'BENEF' },
+      { chaves: ['empastamento_capa', 'empastamento'], nome: 'Empastamento Capa', idStr: 'EMPA' },
       { chaves: ['corte', 'corte_vinco', 'corte_e_vinco', 'corteVinco'], nome: 'Corte e Vinco', idStr: 'CORTE' },
       { chaves: ['dobra', 'dobra_miolo'], nome: 'Dobra', idStr: 'DOB' },
       { chaves: ['cola', 'lombada', 'colagem', 'hotmelt'], nome: 'Lombada / Cola', idStr: 'COLA' },
@@ -58,6 +59,7 @@ export async function POST(request) {
 
     const caminhosDefensivos = {
       'BENEF': ['IMP_CAPA', 'IMP'],
+      'EMPA': ['BENEF', 'IMP_CAPA'],
       'CORTE': ['IMP'],
       'DOB': ['IMP'],
       'COLA': ['DOB', 'IMP'],

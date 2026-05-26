@@ -7,6 +7,7 @@ function obterSetorPertencente(tipo: string, etapa: string): string {
   const t = String(tipo || '').toLowerCase(); const e = String(etapa || '').toLowerCase();
   if (t.includes('impress') || e.includes('impress')) return 'Impressão';
   if (t.includes('laminac') || t.includes('benefic') || e.includes('benefic')) return 'Beneficiamento';
+  if (t.includes('empast') || e.includes('empast')) return 'Empastamento';
   if (t.includes('dobra') || e.includes('dobra')) return 'Dobra';
   if (t.includes('corte') || t.includes('vinco') || e.includes('corte')) return 'Corte e Vinco';
   if (t.includes('shrink') || t.includes('encaixot') || e.includes('shrink') || e.includes('box') || t.includes('kit') || e.includes('kit')) return 'Formação de Kit';
@@ -157,7 +158,7 @@ export default function GanttIndustrial() {
   const [fasesOverrides, setFasesOverrides] = useState<Record<string, string>>({});
   const [kitComponentesDestacados, setKitComponentesDestacados] = useState<Set<string>>(new Set());
 
-  const setoresFixos = ['Impressão', 'Beneficiamento', 'Dobra', 'Corte e Vinco', 'Alceadeira', 'Acabamentos Finais', 'Formação de Kit'];
+  const setoresFixos = ['Impressão', 'Beneficiamento', 'Empastamento', 'Dobra', 'Corte e Vinco', 'Alceadeira', 'Acabamentos Finais', 'Formação de Kit'];
   const PALETA_LOTES = ["bg-blue-500 border-blue-700", "bg-emerald-500 border-emerald-700", "bg-rose-500 border-rose-700", "bg-amber-500 border-amber-700", "bg-purple-500 border-purple-700", "bg-sky-500 border-sky-700", "bg-fuchsia-500 border-fuchsia-700", "bg-lime-500 border-lime-700", "bg-orange-500 border-orange-700"];
 
   useEffect(() => {
@@ -206,7 +207,7 @@ export default function GanttIndustrial() {
       dadosValidos.forEach(t => {
         const tIdNormal = String(t.maquina_id).trim().toUpperCase();
         if (!maquinasIds.has(tIdNormal)) {
-          listaMaquinasFinal.push({ id: t.maquina_id, modelo: t.maq_modelo || `Equipamento: ${t.nome_etapa}`, tipo: t.maq_tipo || obterSetorPertencente('', t.nome_etapa), dias_trabalho: t.dias_trabalho || 5, horas_diarias: t.horas_diarias || 24, maquinas: Math.max(1, Number(t.total_maquinas_parque || 1)), pessoas: Math.max(1, Number(t.total_pessoas_parque || 1)), grafica: graficaAlvo });
+          listaMaquinasFinal.push({ id: t.maquina_id, modelo: t.maq_modelo || `Equipamento: ${t.nome_etapa}`, tipo: obterSetorPertencente(t.maq_tipo || '', t.nome_etapa), dias_trabalho: t.dias_trabalho || 5, horas_diarias: t.horas_diarias || 24, maquinas: Math.max(1, Number(t.total_maquinas_parque || 1)), pessoas: Math.max(1, Number(t.total_pessoas_parque || 1)), grafica: graficaAlvo });
           maquinasIds.add(tIdNormal);
         }
       });
