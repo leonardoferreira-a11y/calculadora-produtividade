@@ -297,6 +297,20 @@ export default function RegistrosTempo() {
     return candidatas.sort((a, b) => Number(b.produtividade_unit || 0) - Number(a.produtividade_unit || 0))[0];
   };
 
+  // Roteamento dedicado: prioriza impressoras cujo modelo/tipo/descrição contenha a palavra-chave
+  // (ex.: "capa" ou "encarte"). Retorna null se nenhuma máquina dedicada existir, deixando o
+  // chamador seguir com o fallback padrão (getMaquinaIdeal).
+  const getMaquinaDedicada = (palavraChave: string) => {
+    const chave = String(palavraChave).toLowerCase();
+    const candidatas = maquinasCargadas.filter(m => {
+      const ehImpressao = String(m.tipo || '').toLowerCase().includes('impress');
+      const texto = `${m.modelo || ''} ${m.tipo || ''} ${m.descricao || ''}`.toLowerCase();
+      return ehImpressao && texto.includes(chave);
+    });
+    if (candidatas.length === 0) return null;
+    return candidatas.sort((a, b) => Number(b.produtividade_unit || 0) - Number(a.produtividade_unit || 0))[0];
+  };
+
   const getMaquinaAlceamentoIdeal = (acabamento: string, totalCadernos: number) => {
     const isPUR = String(acabamento).toUpperCase().includes('PUR');
     let candidatas = maquinasCargadas.filter(m => {
@@ -768,7 +782,7 @@ export default function RegistrosTempo() {
       const resImp = calcularImpressao(mqImp, Number(item.paginacao), Number(item.tiragem));
       const totalCadernos = resImp ? resImp.totais.qtd : 1;
 
-      const mqImpCapa = robo.impressaoCapa ? maquinasCargadas.find(m => String(m.id) === robo.impressaoCapa) : getMaquinaIdeal('Impressão', techCapa);
+      const mqImpCapa = robo.impressaoCapa ? maquinasCargadas.find(m => String(m.id) === robo.impressaoCapa) : (getMaquinaDedicada('capa') || getMaquinaIdeal('Impressão', techCapa));
       const mqBenCapa = robo.benefCapa ? maquinasCargadas.find(m => String(m.id) === robo.benefCapa) : getMaquinaMaisRapida('Beneficiamento');
       const mqEmpCapa = robo.empastCapa ? maquinasCargadas.find(m => String(m.id) === robo.empastCapa) : getMaquinaMaisRapida('Empastamento', 'Capa Dura');
       const mqDob = robo.dobra ? maquinasCargadas.find(m => String(m.id) === robo.dobra) : getMaquinaMaisRapida('Dobra');
@@ -809,7 +823,7 @@ export default function RegistrosTempo() {
       
       let techEncReal = tiragemEnc <= 1450 ? "PLANA - DIGITAL" : "PLANA - OFFSET";
 
-      const mqImpEnc = robo.impressaoEncarte ? maquinasCargadas.find(m => String(m.id) === robo.impressaoEncarte) : getMaquinaIdeal('Impressão', techEncReal);
+      const mqImpEnc = robo.impressaoEncarte ? maquinasCargadas.find(m => String(m.id) === robo.impressaoEncarte) : (getMaquinaDedicada('encarte') || getMaquinaIdeal('Impressão', techEncReal));
       const mqImpAde = robo.impressaoAdesivo ? maquinasCargadas.find(m => String(m.id) === robo.impressaoAdesivo) : getMaquinaIdeal('Impressão', techEncReal);
       const mqCorte = robo.corteVinco ? maquinasCargadas.find(m => String(m.id) === robo.corteVinco) : getMaquinaMaisRapida('Corte');
 
@@ -1405,7 +1419,8 @@ export default function RegistrosTempo() {
                         let techCapa = tiragem < 1500 ? "PLANA - DIGITAL" : "PLANA - OFFSET";
 
                         const mqImpRec = getMaquinaIdeal('Impressão', techMiolo);
-                        const mqImpCapRec = getMaquinaIdeal('Impressão', techCapa);
+                        const mqImpCapRec = getMaquinaDedicada('capa') || getMaquinaIdeal('Impressão', techCapa);
+                        const mqImpEncRec = getMaquinaDedicada('encarte') || mqImpRec;
 
                         const mqBenRec = getMaquinaMaisRapida('Beneficiamento');
                         const mqEmpRec = getMaquinaMaisRapida('Empastamento', 'Capa Dura');
@@ -1438,7 +1453,7 @@ export default function RegistrosTempo() {
                         setIdMaquinaImpressaoCapa(temCalculo && src.impressao_capa?.maquina_id ? String(src.impressao_capa.maquina_id) : (mqImpCapRec ? String(mqImpCapRec.id) : ''));
                         setIdMaquinaBeneficiamentoCapa(temCalculo && src.beneficiamento_capa?.maquina_id ? String(src.beneficiamento_capa.maquina_id) : (mqBenRec ? String(mqBenRec.id) : ''));
                         setIdMaquinaEmpastamentoCapa(temCalculo && src.empastamento_capa?.maquina_id ? String(src.empastamento_capa.maquina_id) : (mqEmpRec ? String(mqEmpRec.id) : ''));
-                        setIdMaquinaImpressaoEncarte(temCalculo && src.impressao_encarte?.maquina_id ? String(src.impressao_encarte.maquina_id) : (mqImpRec ? String(mqImpRec.id) : ''));
+                        setIdMaquinaImpressaoEncarte(temCalculo && src.impressao_encarte?.maquina_id ? String(src.impressao_encarte.maquina_id) : (mqImpEncRec ? String(mqImpEncRec.id) : ''));
                         setIdMaquinaImpressaoAdesivo(temCalculo && src.impressao_adesivo?.maquina_id ? String(src.impressao_adesivo.maquina_id) : (mqImpRec ? String(mqImpRec.id) : ''));
                         setIdMaquinaCorteVinco(temCalculo && src.corte_vinco?.maquina_id ? String(src.corte_vinco.maquina_id) : (mqCorRec ? String(mqCorRec.id) : ''));
                         

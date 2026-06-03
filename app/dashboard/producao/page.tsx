@@ -13,6 +13,7 @@ export default function GestaoProducao() {
   const [arquivoNome, setArquivoNome] = useState('');
   const [dadosPreview, setDadosPreview] = useState<any[]>([]);
   const [dadosParaEnviar, setDadosParaEnviar] = useState<any[]>([]);
+  const [cabecalhoArquivo, setCabecalhoArquivo] = useState<string[]>([]);
 
   const tabelas = [
     { id: 'prod_miolo', nome: 'Miolo', colunas: 8, cabecalho: 'FILTRO_PRODUCAO;GRAFICA;SKU_MIOLO;DESCRICAO;TIRAGEM;LOMBADA;PAGINACAO;ACABAMENTO' },
@@ -24,7 +25,8 @@ export default function GestaoProducao() {
 
   const mostrarAviso = (msg: string, tipo: 'sucesso' | 'erro') => {
     setFeedback({ msg, tipo });
-    setTimeout(() => setFeedback({ msg: '', tipo: '' }), 6000);
+    // Erros costumam ser longos (linha + motivo) — damos mais tempo de leitura.
+    setTimeout(() => setFeedback({ msg: '', tipo: '' }), tipo === 'erro' ? 15000 : 6000);
   };
 
   const mudarTabela = (id: string) => {
@@ -32,6 +34,7 @@ export default function GestaoProducao() {
     setArquivoNome('');
     setDadosPreview([]);
     setDadosParaEnviar([]);
+    setCabecalhoArquivo([]);
   };
 
   const baixarGabarito = () => {
@@ -68,8 +71,11 @@ export default function GestaoProducao() {
           return;
         }
 
+        const cabecalho = (linhas[0] || []).map(c => String(c || '').trim());
+        setCabecalhoArquivo(cabecalho);
+
         const apenasDados = linhas.slice(1);
-        
+
         const limparNumero = (val: string) => {
           if (!val) return null;
           return val.toString().replace(/\./g, '').trim();
@@ -115,7 +121,8 @@ export default function GestaoProducao() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tabela: tabelaSelecionada,
-          dados: dadosParaEnviar
+          dados: dadosParaEnviar,
+          cabecalho: cabecalhoArquivo
         })
       });
 
@@ -126,11 +133,12 @@ export default function GestaoProducao() {
         setArquivoNome('');
         setDadosPreview([]);
         setDadosParaEnviar([]);
+        setCabecalhoArquivo([]);
         const fileInput = document.getElementById('fileInput') as HTMLInputElement;
-        if (fileInput) fileInput.value = ""; 
+        if (fileInput) fileInput.value = "";
 
       } else {
-        mostrarAviso(data.message || 'Erro ao importar.', 'erro');
+        mostrarAviso(data.error || data.message || 'Erro ao importar.', 'erro');
       }
     } catch (error) {
       mostrarAviso('Erro de rede ao tentar importar.', 'erro');
@@ -144,13 +152,16 @@ export default function GestaoProducao() {
       
       {/* TOAST PADRÃO */}
       {feedback.msg && (
-        <div className={`fixed top-10 left-1/2 -translate-x-1/2 z-[9999] px-6 py-3 rounded-lg shadow-2xl border flex items-center gap-3 transition-all duration-300
+        <div className={`fixed top-10 left-1/2 -translate-x-1/2 z-[9999] w-[90vw] max-w-2xl px-6 py-3 rounded-lg shadow-2xl border flex items-start gap-3 transition-all duration-300
           ${feedback.tipo === 'sucesso' ? 'bg-white border-teal-500 text-teal-700' : 'bg-white border-red-500 text-red-700'}`}>
-          <i className={`fas ${feedback.tipo === 'sucesso' ? 'fa-check-circle text-teal-500' : 'fa-times-circle text-red-500'} text-xl`}></i>
-          <div>
-            <p className="font-bold text-xs uppercase tracking-wider leading-none text-slate-800 mb-1">Aviso do Sistema</p>
-            <p className="font-medium text-sm leading-none">{feedback.msg}</p>
+          <i className={`fas ${feedback.tipo === 'sucesso' ? 'fa-check-circle text-teal-500' : 'fa-times-circle text-red-500'} text-xl mt-0.5 shrink-0`}></i>
+          <div className="min-w-0 flex-1">
+            <p className="font-bold text-xs uppercase tracking-wider text-slate-800 mb-1">Aviso do Sistema</p>
+            <p className="font-medium text-sm break-words whitespace-pre-wrap">{feedback.msg}</p>
           </div>
+          <button onClick={() => setFeedback({ msg: '', tipo: '' })} className="text-slate-400 hover:text-slate-700 shrink-0" aria-label="Fechar aviso">
+            <i className="fas fa-times"></i>
+          </button>
         </div>
       )}
 
