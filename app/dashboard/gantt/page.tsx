@@ -465,32 +465,82 @@ export default function GanttIndustrial() {
   }, [tarefasFiltradas, visao, zoomPixelsPorDia, travasCalendario]);
 
   const gerarRelatorioPorSKU = () => {
-    const skusObj: Record<string, any> = {};
+    // 1. Descobrir os tempos de Kit (Encaixotamento/Shrink) nivelados pelo LOTE
+    const kitPorLote: Record<string, { inicio: number, fim: number }> = {};
+    
     tarefasFiltradas.forEach(t => {
-      const start = t._msInicio; const end = t._msFim;
       const etapaStr = String(t.nome_etapa).toLowerCase();
-      if (!skusObj[t.sku_alvo]) skusObj[t.sku_alvo] = {
-        lote: t.filtro_producao,
-        tiragem: t.dados_tooltip?.tiragem || 'N/A',
-        paginacao: t.dados_tooltip?.paginacao || 'N/A',
-        acabamento: t.dados_tooltip?.acabamento || 'N/A',
-        inicioImp: Infinity, fimImp: 0, inicioAcab: Infinity, fimAcabFinais: 0, inicioKit: Infinity, fimKit: 0
-      };
-      const obj = skusObj[t.sku_alvo];
-      if (etapaStr.includes('impress')) { if (start < obj.inicioImp) obj.inicioImp = start; if (end > obj.fimImp) obj.fimImp = end; }
-      if (!etapaStr.includes('impress') && !etapaStr.includes('shrink') && !etapaStr.includes('encaixot') && !etapaStr.includes('kit')) { if (start < obj.inicioAcab) obj.inicioAcab = start; if (end > obj.fimAcabFinais) obj.fimAcabFinais = end; }
-      if (etapaStr.includes('shrink') || etapaStr.includes('encaixot') || etapaStr.includes('kit')) { if (start < obj.inicioKit) obj.inicioKit = start; if (end > obj.fimKit) obj.fimKit = end; }
+      if (etapaStr.includes('shrink') || etapaStr.includes('encaixot') || etapaStr.includes('kit') || etapaStr.includes('box')) {
+        const start = t._msInicio;
+        const end = t._msFim;
+        const lote = t.filtro_producao;
+
+        if (!kitPorLote[lote]) kitPorLote[lote] = { inicio: Infinity, fim: 0 };
+        if (start < kitPorLote[lote].inicio) kitPorLote[lote].inicio = start;
+        if (end > kitPorLote[lote].fim) kitPorLote[lote].fim = end;
+      }
     });
-    const format = (ts: number) => ts === Infinity || ts === 0 ? '-' : new Date(ts).toLocaleString('pt-BR', { timeZone:'UTC', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
-    return Object.entries(skusObj).map(([sku, dados]) => ({
-      sku, lote: dados.lote,
-      tiragem: dados.tiragem,
-      paginacao: dados.paginacao,
-      acabamento: dados.acabamento,
-      inicioImp: format(dados.inicioImp), fimImp: format(dados.fimImp),
-      inicioAcab: format(dados.inicioAcab), fimAcabFinais: format(dados.fimAcabFinais),
-      inicioKit: format(dados.inicioKit), fimKit: format(dados.fimKit)
-    })).sort((a, b) => a.lote.localeCompare(b.lote));
+
+    // 2. Montar as linhas dos SKUs ignorando a tarefa solta do "Kit"
+    const skusObj: Record<string, any> = {};
+    
+    tarefasFiltradas.forEach(t => {
+      const etapaStr = String(t.nome_etapa).toLowerCase();
+      const isKitTask = etapaStr.includes('shrink') || etapaStr.includes('encaixot') || etapaStr.includes('kit') || etapaStr.includes('box');
+      
+      // Pula a etapa de kit na montagem da tabela para não criar uma linha exclusiva/vazia pra ela
+      if (isKitTask) return;
+
+      const start = t._msInicio;
+      const end = t._msFim;
+      
+      if (!skusObj[t.sku_alvo]) {
+        skusObj[t.sku_alvo] = { lote: t.filtro_producao, tiragem: t.dados_tooltip?.tiragem || 'N/A', paginacao: t.dados_tooltip?.paginacao || 'N/A', acabamento: t.dados_tooltip?.acabamento || 'N/A', inicioImp: Infinity, fimImp: 0, inicioAcab: Infinity, fimAcabFinais: 0 };
+      }
+      
+      const obj = skusObj[t.sku_alvo];
+      if (etapaStr.includes('impress')) {
+        if (start < obj.inicioImp) obj.inicioImp = start;
+        if (end > obj.fimImp) obj.fimImp = end;
+      } else {
+        if (start < obj.inicioAcab) obj.inicioAcab = start;
+        if (end > obj.fimAcabFinais) obj.fimAcabFinais = end;
+      }
+    });
+
+    // 3. Função de formatação manual (dd/mm/aaaa hh:mm) sem vírgulas!
+    const format = (ts: number) => {
+      if (ts === Infinity || ts === 0) return '-';
+      const d = new Date(ts);
+      const dia = String(d.getUTCDate()).padStart(2, '0');
+      const mes = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const ano = d.getUTCFullYear();
+      const h = String(d.getUTCHours()).padStart(2, '0');
+      const m = String(d.getUTCMinutes()).padStart(2, '0');
+      return `${dia}/${mes}/${ano} ${h}:${m}`;
+    };
+
+    // 4. Juntar as peças: Linha do SKU + Tempo de Kit do respectivo Lote
+    return Object.entries(skusObj).map(([sku, dados]) => {
+      const kitDoLote = kitPorLote[dados.lote] || { inicio: Infinity, fim: 0 };
+      
+      // O Término Geral é o que for mais tarde: o fim dos acabamentos ou o fim do kit
+      const terminoGeral = Math.max(dados.fimAcabFinais, kitDoLote.fim);
+
+      return {
+        sku,
+        lote: dados.lote,
+        tiragem: dados.tiragem,
+        paginacao: dados.paginacao,
+        acabamento: dados.acabamento,
+        inicioImp: format(dados.inicioImp),
+        fimImp: format(dados.fimImp),
+        inicioAcab: format(dados.inicioAcab), 
+        fimAcabFinais: format(dados.fimAcabFinais),
+        inicioKit: format(kitDoLote.inicio), 
+        fimKit: format(terminoGeral) // Usado também como a coluna "Término Geral"
+      };
+    }).sort((a, b) => a.lote.localeCompare(b.lote));
   };
 
   const exportarRelatorioCSV = () => {

@@ -111,6 +111,7 @@ export async function POST(request) {
             _isDobra: nomeE.includes('dobra') || maqT.includes('dobra'),
             _isImp: nomeE.includes('impress') || maqT.includes('impress'),
             _isPUR: maqT.toUpperCase().includes('PUR') || maqM.toUpperCase().includes('PUR') || maqT.toUpperCase().includes('COLADEIRA'),
+            _isKit: nomeE.includes('encaixot') || nomeE.includes('shrink') || nomeE.includes('kit') || nomeE.includes('box'),
             _isManualEspiral: nomeE.includes('espiral') && (
                 maqT.includes('manual') || maqM.includes('manual') ||
                 (!maqT.includes('auto') && !maqT.includes('semi') && !maqM.includes('auto') && !maqM.includes('semi'))
@@ -287,6 +288,8 @@ export async function POST(request) {
         }
 
         if (pai && prontoParaAgendar) {
+          if (pai._isPUR && t._isKit) delayCuraMs = 24 * 60 * 60 * 1000;
+
           if (t._isEspiral && pai._isFura) {
             let mqIdPreview = t._isManualEspiral ? 'ESPIRALAR_MANUAL_UNIFIED' : String(t.maquina_id || '').trim();
             const simPreview = simuladores[mqIdPreview] || {};
