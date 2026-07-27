@@ -177,6 +177,22 @@ export default function GanttIndustrial() {
     try { const res = await fetch(`/api/producao/gantt/travas?grafica=${graficaAlvo}`); if (res.ok) setTravasCalendario(await res.json()); } catch (e) {}
   };
 
+  // Defaults de simulação: por padrão a gráfica usa TODA a quantidade de
+  // equipamentos disponíveis (não apenas 1) e o modo de operação é
+  // Concorrente para Impressão e Diluir Carga para os demais setores.
+  const ehMaquinaImpressao = (mq: any) => String(mq?.tipo || '').toLowerCase().includes('impress') || String(mq?.modelo || '').toLowerCase().includes('impress');
+  const configPadraoMaquina = (mq: any) => ({
+    usadas: Math.max(1, Number(mq.maquinas || mq.pessoas || 1)),
+    modo: ehMaquinaImpressao(mq) ? 'CONCORRENTE' : 'DILUIR'
+  });
+  const construirSimuladoresPadrao = (lista: any[], existentes: Record<string, any>) => {
+    const base: Record<string, { usadas: number, modo: string }> = {};
+    for (const mq of lista) {
+      if (!existentes[mq.id]) base[mq.id] = configPadraoMaquina(mq);
+    }
+    return base;
+  };
+
   const abrirGanttDaGrafica = async (graficaAlvo: string, simParams = simuladores, lotesParaAgendar: string[] = [], prioridades: string[] = []) => {
     if (isLoading) return;
     setIsLoading(true);
@@ -192,8 +208,13 @@ export default function GanttIndustrial() {
       const limiteFinalEspiral = Math.max(1, capacidadePessoasEspiral);
       listaMaquinasFinal.push({ id: 'ESPIRALAR_MANUAL_UNIFIED', modelo: 'Linha Unificada de Espiralação Manual', tipo: 'Acabamentos Finais', dias_trabalho: espiraisFisicas[0]?.dias_trabalho || 5, horas_diarias: espiraisFisicas[0]?.horas_diarias || 24, maquinas: limiteFinalEspiral, pessoas: limiteFinalEspiral, grafica: graficaAlvo });
 
+      // Semeia os defaults (usar toda a qtd disponível; Impressão=Concorrente,
+      // demais=Diluir Carga) para máquinas ainda não configuradas pelo usuário.
+      // O que o usuário já ajustou (simParams) tem prioridade.
+      const simParamsEfetivo = { ...construirSimuladoresPadrao(listaMaquinasFinal, simParams), ...simParams };
+
       setLoadingMsg('Roteando e calculando milhares de tarefas...');
-      const resTar = await fetch(`/api/producao/gantt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grafica: graficaAlvo, simuladores: simParams, prioridades, lotesVisiveis: lotesParaAgendar }) });
+      const resTar = await fetch(`/api/producao/gantt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grafica: graficaAlvo, simuladores: simParamsEfetivo, prioridades, lotesVisiveis: lotesParaAgendar }) });
       const ts = await resTar.json();
       const dadosValidos = Array.isArray(ts) ? ts : [];
 
@@ -211,6 +232,11 @@ export default function GanttIndustrial() {
           maquinasIds.add(tIdNormal);
         }
       });
+
+      // Reflete na UI os mesmos defaults usados no agendamento (inclui agora as
+      // máquinas derivadas de tarefas). O que o usuário já ajustou é preservado.
+      const simParamsUI = { ...construirSimuladoresPadrao(listaMaquinasFinal, simParamsEfetivo), ...simParamsEfetivo };
+      setSimuladores(simParamsUI);
 
       setMaquinas(listaMaquinasFinal);
       setTarefasGlobais(dadosValidos);
@@ -567,12 +593,12 @@ export default function GanttIndustrial() {
 
       {etapa === 1 && (
         <div className="p-4">
-          <header className="mb-6 border-b pb-3"><h1 className="text-xl font-bold text-slate-800 uppercase">Orquestrador de Linha de Tempo (Gantt)</h1></header>
+          <header className="mb-6 border-b border-slate-200 pb-4"><h1 className="text-2xl font-black text-slate-900 tracking-tight">Orquestrador de Linha de Tempo (Gantt)</h1></header>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
             {graficasDisponiveis.map((graf, i) => (
-              <div key={i} className="bg-white border p-6 rounded-lg text-center shadow-sm cursor-pointer transition-all hover:-translate-y-1 hover:shadow-md" onClick={() => abrirGanttDaGrafica(graf)}>
-                <h3 className="text-lg font-black text-slate-800 uppercase mb-4">{graf}</h3>
-                <button disabled={isLoading} className="w-full bg-violet-600 text-white px-4 py-2 rounded text-xs font-bold uppercase hover:bg-violet-700 disabled:opacity-50">Abrir Painel Gráfico</button>
+              <div key={i} className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 text-center cursor-pointer transition-all hover:-translate-y-1 hover:shadow-md hover:border-slate-300" onClick={() => abrirGanttDaGrafica(graf)}>
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight mb-4">{graf}</h3>
+                <button disabled={isLoading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-lg shadow-sm shadow-blue-600/20 transition-all text-xs uppercase disabled:opacity-50">Abrir Painel Gráfico</button>
               </div>
             ))}
           </div>
@@ -580,23 +606,23 @@ export default function GanttIndustrial() {
       )}
 
       {etapa === 2 && (
-        <div className="w-full h-[calc(100vh-140px)] flex flex-col border rounded-lg overflow-hidden bg-white">
+        <div className="w-full h-[calc(100vh-140px)] flex flex-col border border-slate-200 rounded-xl shadow-sm overflow-hidden bg-white">
           <header className="bg-slate-800 text-white p-3 flex justify-between items-center z-50 select-none">
             <h1 className="text-sm font-bold uppercase">Parque Produtivo: {graficaSelecionada}</h1>
             <div className="flex gap-3 items-center">
-              <div className="relative flex items-center bg-slate-700 rounded border border-slate-600 px-2 py-1">
+              <div className="relative flex items-center bg-slate-700 rounded-lg border border-slate-600 px-2 py-1">
                 <i className="fas fa-search text-slate-400 text-xs mr-2"></i>
                 <input type="text" placeholder="Filtrar SKU..." value={buscaSkuQuery} onChange={(e) => setBuscaSkuQuery(e.target.value)} className="bg-transparent text-white font-mono font-bold text-xs outline-none w-32 placeholder-slate-400" />
                 {buscaSkuQuery && <button onClick={() => setBuscaSkuQuery('')} className="text-slate-400 font-bold hover:text-white">&times;</button>}
               </div>
-              <div className="flex items-center gap-1 bg-slate-700 p-1 rounded border border-slate-600">
-                <button onClick={() => setVisao('DIAS')} className={`text-[10px] font-bold px-3 py-1 rounded cursor-pointer transition-all duration-200 active:scale-95 ${visao === 'DIAS' ? 'bg-violet-500 text-white' : 'text-slate-300 hover:bg-slate-600 hover:text-white'}`}>DIAS</button>
-                <button onClick={() => setVisao('SEMANAS')} className={`text-[10px] font-bold px-3 py-1 rounded cursor-pointer transition-all duration-200 active:scale-95 ${visao === 'SEMANAS' ? 'bg-violet-500 text-white' : 'text-slate-300 hover:bg-slate-600 hover:text-white'}`}>SEMANAS</button>
-                <button onClick={() => setVisao('MESES')} className={`text-[10px] font-bold px-3 py-1 rounded cursor-pointer transition-all duration-200 active:scale-95 ${visao === 'MESES' ? 'bg-violet-500 text-white' : 'text-slate-300 hover:bg-slate-600 hover:text-white'}`}>MESES</button>
+              <div className="flex items-center gap-1 bg-slate-700 p-1 rounded-lg border border-slate-600">
+                <button onClick={() => setVisao('DIAS')} className={`text-[10px] font-bold px-3 py-1 rounded-md cursor-pointer transition-all duration-200 active:scale-95 ${visao === 'DIAS' ? 'bg-violet-500 text-white' : 'text-slate-300 hover:bg-slate-600 hover:text-white'}`}>DIAS</button>
+                <button onClick={() => setVisao('SEMANAS')} className={`text-[10px] font-bold px-3 py-1 rounded-md cursor-pointer transition-all duration-200 active:scale-95 ${visao === 'SEMANAS' ? 'bg-violet-500 text-white' : 'text-slate-300 hover:bg-slate-600 hover:text-white'}`}>SEMANAS</button>
+                <button onClick={() => setVisao('MESES')} className={`text-[10px] font-bold px-3 py-1 rounded-md cursor-pointer transition-all duration-200 active:scale-95 ${visao === 'MESES' ? 'bg-violet-500 text-white' : 'text-slate-300 hover:bg-slate-600 hover:text-white'}`}>MESES</button>
               </div>
 
               <div className="relative">
-                <button onClick={() => setShowFiltroLote(!showFiltroLote)} className={`border font-bold px-3 py-1.5 rounded text-xs flex items-center gap-2 cursor-pointer transition-all duration-200 active:scale-95 ${loteFocado ? 'bg-amber-500 border-amber-600 text-white' : 'bg-slate-700 border-slate-600 text-white hover:bg-slate-600'}`}>
+                <button onClick={() => setShowFiltroLote(!showFiltroLote)} className={`border font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-2 cursor-pointer transition-all duration-200 active:scale-95 ${loteFocado ? 'bg-amber-500 border-amber-600 text-white' : 'bg-slate-700 border-slate-600 text-white hover:bg-slate-600'}`}>
                   <i className="fas fa-layer-group"></i>
                   Prioridades {loteFocado ? `• ${String(loteFocado).substring(0, 8)}` : `(${draftLotesOcultos.size === 0 ? 'Todos' : `${draftPrioridades.length - draftLotesOcultos.size} vis.`})`}
                 </button>
@@ -634,7 +660,7 @@ export default function GanttIndustrial() {
                               type="number" min={1} max={draftPrioridades.length} value={idx + 1}
                               onChange={(e) => handlePriorityInput(idx, Number(e.target.value))}
                               onClick={(e) => (e.target as HTMLInputElement).select()}
-                              className="w-8 text-[10px] font-black text-slate-600 text-center border border-slate-200 rounded bg-white outline-none focus:border-violet-400 px-0.5 cursor-text"
+                              className="w-8 text-[10px] font-black text-slate-600 text-center border border-slate-200 rounded-md bg-white outline-none focus:border-violet-400 px-0.5 cursor-text"
                             />
                             <span className="text-slate-300 hover:text-violet-400 text-xs" title="Arraste para reordenar">⠿</span>
                             <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${(mapaCoresLotes[lote as string] || 'bg-slate-400').split(' ')[0]}`}></span>
@@ -654,15 +680,15 @@ export default function GanttIndustrial() {
               </div>
 
               {isDirty && (
-                <button onClick={handleRecalcularGantt} className="bg-emerald-500 hover:bg-emerald-400 text-white font-black px-4 py-1.5 rounded text-xs shadow-lg animate-pulse flex items-center gap-2 cursor-pointer active:scale-95 transition-all">
+                <button onClick={handleRecalcularGantt} className="bg-emerald-500 hover:bg-emerald-400 text-white font-black px-4 py-1.5 rounded-lg text-xs shadow-lg animate-pulse flex items-center gap-2 cursor-pointer active:scale-95 transition-all">
                   <i className="fas fa-sync-alt"></i> Simular / Recalcular
                 </button>
               )}
-              {(skuDestacado || kitComponentesDestacados.size > 0) && <button onClick={() => { setSkuDestacado(null); setKitComponentesDestacados(new Set()); }} className="bg-amber-500 text-slate-900 font-bold px-2 py-1.5 rounded text-[10px] uppercase shadow">Limpar SKU</button>}
-              <button onClick={() => setShowModalRelatorio(true)} className="bg-teal-600 hover:bg-teal-500 text-white font-bold px-3 py-1.5 rounded text-xs shadow-sm"><i className="fas fa-file-alt mr-1"></i> Prazos</button>
-              <button onClick={() => setShowModalTravas(true)} className="bg-violet-600 hover:bg-violet-500 text-white font-bold px-3 py-1.5 rounded text-xs shadow-sm"><i className="fas fa-calendar-alt mr-1"></i> Calendário</button>
-              <div className="flex items-center gap-2 bg-slate-700 p-1.5 rounded"><span className="text-[10px] text-slate-300 font-bold uppercase">Zoom:</span><input type="range" min="60" max="800" value={zoomPixelsPorDia} onChange={(e) => setZoomPixelsPorDia(Number(e.target.value))} className="w-24 accent-violet-500 cursor-pointer" /></div>
-              <button onClick={() => { setSkuDestacado(null); setEtapa(1); }} className="bg-slate-700 text-white font-bold px-3 py-1.5 rounded text-xs border border-slate-600 hover:bg-slate-600">Voltar</button>
+              {(skuDestacado || kitComponentesDestacados.size > 0) && <button onClick={() => { setSkuDestacado(null); setKitComponentesDestacados(new Set()); }} className="bg-amber-500 text-slate-900 font-bold px-2 py-1.5 rounded-lg text-[10px] uppercase shadow">Limpar SKU</button>}
+              <button onClick={() => setShowModalRelatorio(true)} className="bg-teal-600 hover:bg-teal-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs shadow-sm"><i className="fas fa-file-alt mr-1"></i> Prazos</button>
+              <button onClick={() => setShowModalTravas(true)} className="bg-violet-600 hover:bg-violet-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs shadow-sm"><i className="fas fa-calendar-alt mr-1"></i> Calendário</button>
+              <div className="flex items-center gap-2 bg-slate-700 p-1.5 rounded-lg"><span className="text-[10px] text-slate-300 font-bold uppercase">Zoom:</span><input type="range" min="60" max="800" value={zoomPixelsPorDia} onChange={(e) => setZoomPixelsPorDia(Number(e.target.value))} className="w-24 accent-violet-500 cursor-pointer" /></div>
+              <button onClick={() => { setSkuDestacado(null); setEtapa(1); }} className="bg-slate-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs border border-slate-600 hover:bg-slate-600">Voltar</button>
             </div>
           </header>
 
@@ -678,7 +704,7 @@ export default function GanttIndustrial() {
                       <div key={setor}>
                         <div className="h-[30px] bg-slate-200/50 text-[10px] font-black uppercase text-violet-900 px-4 flex items-center border-b z-10 relative">{setor}</div>
                         {maqSetor.map(mq => {
-                          const configMq = simuladores[mq.id] || { usadas: 1, modo: 'DILUIR' };
+                          const configMq = simuladores[mq.id] || configPadraoMaquina(mq);
                           const tarefasDaMq = tarefasPorMaquinaSetor.get(`${setor}::${String(mq.id).trim()}`) || [];
                           const maxSub = tarefasDaMq.reduce((max: number, t: any) => Math.max(max, t.sub_linha || 0), 0);
                           const alturaLinhaCalculada = Math.max(56, (maxSub + 1) * 36 + 18);
@@ -761,8 +787,8 @@ export default function GanttIndustrial() {
 
       {/* MODAL EDIÇÃO DE DATAS */}
       {showModalEditeDatas && blocoEditando && (
-        <div className="fixed inset-0 bg-slate-900/60 flex justify-center items-center z-[9998] p-4 backdrop-blur-xs" onClick={(e) => { if (e.target === e.currentTarget) setShowModalEditeDatas(false); }}>
-          <div className="bg-white rounded-xl shadow-2xl border w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh]">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[9998] p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowModalEditeDatas(false); }}>
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh]">
             <header className="bg-slate-800 p-4 text-white flex justify-between items-center">
               <div>
                 <h3 className="font-bold text-sm uppercase tracking-wide"><i className="fas fa-calendar-edit mr-2 text-violet-400"></i>Detalhes do Lote / SKU</h3>
@@ -773,7 +799,7 @@ export default function GanttIndustrial() {
 
             <div className="flex-1 overflow-auto p-4">
               <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Fases Previstas</h4>
-              <div className="border rounded-lg overflow-hidden text-xs mb-4">
+              <div className="border border-slate-200 rounded-lg overflow-hidden text-xs mb-4">
                 <table className="w-full">
                   <thead className="bg-slate-50 text-[10px] font-bold text-slate-500 uppercase">
                     <tr><th className="p-2 text-left">Etapa</th><th className="p-2 text-center">Início</th><th className="p-2 text-center">Fim</th></tr>
@@ -801,7 +827,7 @@ export default function GanttIndustrial() {
                   type="date"
                   value={novaDataInicio}
                   onChange={(e) => { setNovaDataInicio(e.target.value); setErroDataInicio(''); }}
-                  className="w-full border border-violet-300 rounded-md px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-violet-400 bg-white"
+                  className="w-full border border-violet-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-violet-400 bg-white"
                 />
                 {erroDataInicio && (
                   <p className="text-red-600 text-xs font-bold mt-1.5 flex items-center gap-1">
@@ -809,7 +835,7 @@ export default function GanttIndustrial() {
                   </p>
                 )}
               </div>
-              <div className="border rounded-lg overflow-hidden">
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
                 <div className="bg-slate-100 px-3 py-2 text-[10px] font-black text-slate-600 uppercase tracking-wider">Replanejar Fase Específica (Override)</div>
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50">
@@ -830,7 +856,7 @@ export default function GanttIndustrial() {
                             <td className="p-2">
                               <input type="datetime-local" value={overrideVal || baseDateStr}
                                 onChange={(e) => setFasesOverrides(prev => ({ ...prev, [t.nome_etapa]: e.target.value }))}
-                                className="w-full border border-slate-200 rounded px-2 py-1 text-xs font-mono outline-none focus:ring-1 focus:ring-violet-400"
+                                className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono outline-none focus:ring-1 focus:ring-violet-400"
                               />
                             </td>
                             <td className="p-2 text-center">
@@ -844,9 +870,9 @@ export default function GanttIndustrial() {
               </div>
             </div>
 
-            <div className="p-4 border-t bg-slate-50 flex justify-end gap-3">
-              <button onClick={() => { setShowModalEditeDatas(false); setFasesOverrides({}); }} className="px-4 py-2 text-sm font-bold text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-100 transition-colors">Cancelar</button>
-              <button onClick={handleSalvarDataInicio} className="px-6 py-2 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors flex items-center gap-2">
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
+              <button onClick={() => { setShowModalEditeDatas(false); setFasesOverrides({}); }} className="bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300 font-bold py-2.5 px-5 rounded-lg shadow-sm transition-all text-sm">Cancelar</button>
+              <button onClick={handleSalvarDataInicio} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-5 rounded-lg shadow-sm shadow-blue-600/20 transition-all text-sm flex items-center gap-2">
                 <i className="fas fa-save"></i> Salvar e Recalcular
               </button>
             </div>
@@ -855,8 +881,8 @@ export default function GanttIndustrial() {
       )}
 
       {showModalRelatorio && (
-        <div className="fixed inset-0 bg-slate-900/60 flex justify-center items-center z-[999] p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-xl shadow-2xl border w-full max-w-6xl overflow-hidden flex flex-col max-h-[85vh]">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[999] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-6xl overflow-hidden flex flex-col max-h-[85vh]">
             <header className="bg-teal-700 p-4 text-white flex justify-between items-center">
               <h3 className="font-bold text-sm uppercase tracking-wide"><i className="fas fa-list-alt mr-2"></i> Relatório Consolidado de Marcos Operacionais</h3>
               <div className="flex items-center gap-4">
@@ -904,44 +930,44 @@ export default function GanttIndustrial() {
       )}
 
       {showModalTravas && (
-        <div className="fixed inset-0 bg-slate-900/60 flex justify-center items-center z-[999] p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-xl shadow-2xl border w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[999] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
             <header className="bg-slate-800 p-3 text-white flex justify-between items-center">
               <div className="flex gap-4">
-                <button onClick={() => setAbaAtiva('TRAVAS')} className={`text-xs font-bold uppercase px-3 py-1 rounded transition-colors ${abaAtiva === 'TRAVAS' ? 'bg-violet-600 text-white shadow-inner' : 'text-slate-400'}`}>Travas Diárias</button>
-                <button onClick={() => setAbaAtiva('REGIME')} className={`text-xs font-bold uppercase px-3 py-1 rounded transition-colors ${abaAtiva === 'REGIME' ? 'bg-violet-600 text-white shadow-inner' : 'text-slate-400'}`}>Regime Base</button>
+                <button onClick={() => setAbaAtiva('TRAVAS')} className={`text-xs font-bold uppercase px-3 py-1 rounded-md transition-colors ${abaAtiva === 'TRAVAS' ? 'bg-violet-600 text-white shadow-inner' : 'text-slate-400'}`}>Travas Diárias</button>
+                <button onClick={() => setAbaAtiva('REGIME')} className={`text-xs font-bold uppercase px-3 py-1 rounded-md transition-colors ${abaAtiva === 'REGIME' ? 'bg-violet-600 text-white shadow-inner' : 'text-slate-400'}`}>Regime Base</button>
               </div>
               <button onClick={() => setShowModalTravas(false)} className="text-slate-400 hover:text-white font-bold text-xl">&times;</button>
             </header>
             {abaAtiva === 'TRAVAS' && (
               <div className="flex-1 flex flex-col overflow-hidden">
-                <form onSubmit={handleAdicionarTrava} className="p-4 bg-slate-50 border-b flex flex-col gap-3">
+                <form onSubmit={handleAdicionarTrava} className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col gap-3">
                   <div className="grid grid-cols-2 gap-3">
-                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Equipamento Alvo</label><select value={maquinaTrava} onChange={(e) => setMaquinaTrava(e.target.value)} className="w-full text-xs p-2 border rounded font-bold bg-white text-slate-800">{maquinas.map(m => <option key={m.id} value={m.id}>{m.modelo}</option>)}</select></div>
-                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Data Alvo</label><input type="date" required value={dataAlvoTrava} onChange={(e) => setDataAlvoTrava(e.target.value)} className="w-full text-xs p-2 border rounded bg-white text-slate-800" /></div>
+                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Equipamento Alvo</label><select value={maquinaTrava} onChange={(e) => setMaquinaTrava(e.target.value)} className="w-full text-xs p-2 border border-slate-200 rounded-lg font-bold bg-white text-slate-800">{maquinas.map(m => <option key={m.id} value={m.id}>{m.modelo}</option>)}</select></div>
+                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Data Alvo</label><input type="date" required value={dataAlvoTrava} onChange={(e) => setDataAlvoTrava(e.target.value)} className="w-full text-xs p-2 border border-slate-200 rounded-lg bg-white text-slate-800" /></div>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
-                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Status</label><select value={statusOperacional} onChange={(e) => setStatusOperacional(e.target.value)} className="w-full text-xs p-2 border rounded bg-white font-bold text-slate-800"><option value="INATIVO">INATIVO (0h)</option><option value="PARCIAL">PARCIAL</option></select></div>
-                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Horas Úteis</label><input type="number" step="0.25" min="0" max="24" required value={horasDisponiveis} onChange={(e) => setHorasDisponiveis(e.target.value)} className="w-full text-xs p-2 border rounded bg-white text-violet-700 font-bold" /></div>
-                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Obs</label><input type="text" required placeholder="Feriado..." value={motivoTrava} onChange={(e) => setMotivoTrava(e.target.value)} className="w-full text-xs p-2 border rounded bg-white text-slate-800" /></div>
+                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Status</label><select value={statusOperacional} onChange={(e) => setStatusOperacional(e.target.value)} className="w-full text-xs p-2 border border-slate-200 rounded-lg bg-white font-bold text-slate-800"><option value="INATIVO">INATIVO (0h)</option><option value="PARCIAL">PARCIAL</option></select></div>
+                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Horas Úteis</label><input type="number" step="0.25" min="0" max="24" required value={horasDisponiveis} onChange={(e) => setHorasDisponiveis(e.target.value)} className="w-full text-xs p-2 border border-slate-200 rounded-lg bg-white text-violet-700 font-bold" /></div>
+                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Obs</label><input type="text" required placeholder="Feriado..." value={motivoTrava} onChange={(e) => setMotivoTrava(e.target.value)} className="w-full text-xs p-2 border border-slate-200 rounded-lg bg-white text-slate-800" /></div>
                   </div>
-                  <button type="submit" className="w-full bg-emerald-600 text-white font-bold py-2 rounded text-xs uppercase shadow">Gravar Indisponibilidade</button>
+                  <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg text-xs uppercase shadow-sm transition-all">Gravar Indisponibilidade</button>
                 </form>
-                <div className="flex-1 overflow-auto p-4"><div className="divide-y border rounded-lg text-xs shadow-sm">{travasCalendario.map((t, idx) => (<div key={idx} className="p-3 bg-white flex justify-between items-center"><div><span className="font-bold text-slate-800">Dia Alvo: {new Date(t.data_alvo).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</span><br/><span className="text-slate-400 font-mono text-[10px] mt-0.5">MÁQ: {t.maquina_id} · Obs: {t.motivo}</span></div><span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-mono font-bold border uppercase">{t.status_operacional} ({t.horas_disponiveis}h)</span></div>))}</div></div>
+                <div className="flex-1 overflow-auto p-4"><div className="divide-y divide-slate-100 border border-slate-200 rounded-lg text-xs shadow-sm">{travasCalendario.map((t, idx) => (<div key={idx} className="p-3 bg-white flex justify-between items-center"><div><span className="font-bold text-slate-800">Dia Alvo: {new Date(t.data_alvo).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</span><br/><span className="text-slate-400 font-mono text-[10px] mt-0.5">MÁQ: {t.maquina_id} · Obs: {t.motivo}</span></div><span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-mono font-bold border border-slate-200 uppercase">{t.status_operacional} ({t.horas_disponiveis}h)</span></div>))}</div></div>
               </div>
             )}
             {abaAtiva === 'REGIME' && (
               <div className="flex-1 flex flex-col overflow-hidden">
-                <div className="p-4 bg-violet-50 border-b">
+                <div className="p-4 bg-violet-50 border-b border-slate-200">
                   <div className="flex flex-col sm:flex-row gap-4 items-end">
                     <div className="flex-1">
                       <label className="block text-[10px] font-bold text-violet-800 uppercase mb-1">Configurar Carga (Grupo)</label>
                       <div className="flex gap-2">
-                        <select value={diasMassa} onChange={(e) => setDiasMassa(Number(e.target.value))} className="flex-1 text-xs p-2.5 border rounded-lg bg-white font-bold text-slate-800 outline-none">
+                        <select value={diasMassa} onChange={(e) => setDiasMassa(Number(e.target.value))} className="flex-1 text-xs p-2.5 border border-slate-200 rounded-lg bg-white font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all">
                           <option value={5}>5 Dias (Seg a Sex)</option><option value={6}>6 Dias (Seg a Sáb)</option><option value={7}>7 Dias (Seg a Dom)</option>
                         </select>
                         <div className="w-40 relative">
-                          <input type="number" step="0.5" min="0" max="24" required value={horasMassa} onChange={(e) => setHorasMassa(e.target.value)} className="w-full text-xs p-2.5 border rounded-lg font-mono font-black text-violet-700 outline-none pr-10" />
+                          <input type="number" step="0.5" min="0" max="24" required value={horasMassa} onChange={(e) => setHorasMassa(e.target.value)} className="w-full text-xs p-2.5 border border-slate-200 rounded-lg font-mono font-black text-violet-700 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all pr-10" />
                           <span className="absolute right-3 top-3 text-[10px] text-slate-400">h/dia</span>
                         </div>
                       </div>
@@ -953,7 +979,7 @@ export default function GanttIndustrial() {
                   <div className="flex justify-between items-center mb-3"><h4 className="text-[10px] font-black uppercase text-slate-500">Recurso Alvo</h4><button onClick={toggleSelecionarTudo} className="text-[10px] font-bold text-violet-600 uppercase">{idsSelecionados.length === maquinas.length ? "Desmarcar" : "Marcar Todas"}</button></div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {maquinas.map(mq => (
-                      <label key={mq.id} className={`flex items-center gap-3 p-2.5 border rounded-lg cursor-pointer transition-all shadow-sm ${idsSelecionados.includes(mq.id) ? 'bg-violet-100 border-violet-400' : 'bg-white'}`}>
+                      <label key={mq.id} className={`flex items-center gap-3 p-2.5 border rounded-lg cursor-pointer transition-all shadow-sm ${idsSelecionados.includes(mq.id) ? 'bg-violet-100 border-violet-400' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
                         <input type="checkbox" className="w-4 h-4 accent-violet-600" checked={idsSelecionados.includes(mq.id)} onChange={() => setIdsSelecionados(prev => prev.includes(mq.id) ? prev.filter(i => i !== mq.id) : [...prev, mq.id])} />
                         <div className="flex flex-col overflow-hidden"><span className="text-[11px] font-bold text-slate-800 truncate">{mq.modelo}</span><span className="text-[9px] text-slate-500 font-mono">ID: {mq.id} · Carga: {mq.dias_trabalho || 5}D / {Number(mq.horas_diarias || 24).toFixed(1)}h</span></div>
                       </label>

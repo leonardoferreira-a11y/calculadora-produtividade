@@ -560,6 +560,28 @@ export default function RegistrosTempo() {
     return { parametros: { capacidadeMax, velocidade, setupUnitario: maquina.setup, tiragemProduzida, paginasRestantes, cadernosInteiros, posesFracionado: poses, passadas, qtdCores, tiragemFinalOS }, maquinaSetupStr: maquina.setup || '00:00', linhas, totais: { qtd: totalCadernos, giros: totalGirosInteiros + girosFracionado, setup: decimalToTime(setupInteirosDecimal + setupFracionadoDecimal), rodagem: decimalToTime(rodagemInteirosDecimal + rodagemFracionadoDecimal), total: decimalToTime(setupInteirosDecimal + setupFracionadoDecimal + rodagemInteirosDecimal + rodagemFracionadoDecimal) } };
   };
 
+  // Base PADRÃO de acabamento (fórmula fixa), usada quando o item é calculado
+  // SÓ com acabamento (sem impressora selecionada). Sem a impressão não existe
+  // uma máquina para dimensionar cadernos/tiragem, então assumimos:
+  //  - 16 páginas por caderno (CAP_CADERNO_PADRAO);
+  //  - tiragem de quebra padrão (mesma heurística do cabeçalho: +175 e +6%).
+  // Produz o mesmo "formato" que calcularImpressao (parametros + totais.qtd),
+  // para que as funções de acabamento consigam consumir sem alterações.
+  const CAP_CADERNO_PADRAO = 16;
+  const calcularBaseAcabamentoPadrao = (paginasOS: number, tiragemFinalOS: number) => {
+    const paginas = Number(paginasOS) || 0;
+    const tiragem = Number(tiragemFinalOS) || 0;
+    const tiragemProduzida = Math.round(tiragem + 175 + (tiragem * 0.06));
+    const cadernosInteiros = Math.floor(paginas / CAP_CADERNO_PADRAO);
+    const paginasRestantes = paginas % CAP_CADERNO_PADRAO;
+    const totalCadernos = cadernosInteiros + (paginasRestantes > 0 ? 1 : 0);
+    return {
+      _basePadrao: true,
+      parametros: { capacidadeMax: CAP_CADERNO_PADRAO, tiragemProduzida, cadernosInteiros, paginasRestantes },
+      totais: { qtd: totalCadernos }
+    };
+  };
+
   const calcularImpressaoCapa = (maquina: any, capas: any[], tiragemOS: number) => {
     if (!maquina || !capas || capas.length === 0) return null;
     const velocidade = Number(maquina.produtividade_unit) || 1;
@@ -727,8 +749,10 @@ export default function RegistrosTempo() {
   };
 
   const calcularDobra = (maquinaDobra: any, analiseImpressao: any, maquinaImpressaoSelecionada: any, paginasOS: number = 0) => {
-    if (!maquinaDobra || !analiseImpressao || !maquinaImpressaoSelecionada) return null;
-    const ehRotativa = String(maquinaImpressaoSelecionada.modelo || '').toUpperCase().includes('ROTATIVA') || String(maquinaImpressaoSelecionada.tecnologia || '').toUpperCase().includes('ROTATIVA');
+    // maquinaImpressaoSelecionada pode ser undefined no cálculo "só acabamento"
+    // (base padrão). Nesse caso, sem impressora, tratamos como NÃO-rotativa (plana).
+    if (!maquinaDobra || !analiseImpressao) return null;
+    const ehRotativa = String(maquinaImpressaoSelecionada?.modelo || '').toUpperCase().includes('ROTATIVA') || String(maquinaImpressaoSelecionada?.tecnologia || '').toUpperCase().includes('ROTATIVA');
     if (ehRotativa) return { isRotativa: true, totais: { entradas: 0, setup: '00:00', rodagem: '00:00', total: '00:00' } };
 
     const tiragemProduzida = analiseImpressao.parametros.tiragemProduzida;
@@ -1098,8 +1122,8 @@ export default function RegistrosTempo() {
 
       {/* OVERLAY SUCESSO MANUAL */}
       {feedback.msg && !modalRobo && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white border-b-4 border-emerald-600 rounded-lg shadow-2xl p-8 flex flex-col items-center max-w-sm">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white border-b-4 border-emerald-600 rounded-2xl shadow-2xl p-8 flex flex-col items-center max-w-sm">
             <i className="fas fa-check-circle text-[60px] text-emerald-500 mb-4 drop-shadow-md"></i>
             <h3 className="text-lg font-black text-slate-800 uppercase text-center tracking-wide">{feedback.msg}</h3>
           </div>
@@ -1108,8 +1132,8 @@ export default function RegistrosTempo() {
 
       {/* 🤖 MODAL DO ROBÔ COM PROGRESSO E BOTÃO DE CANCELAR/CONFIRMAR */}
       {modalRobo && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl w-[400px] overflow-hidden flex flex-col items-center p-8 text-center">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden flex flex-col items-center p-8 text-center">
             {progressoRobo.status === 'processando' && <i className={`fas ${progressoRobo.tipo === 'Apagando' ? 'fa-eraser text-red-500' : 'fa-robot text-indigo-500'} text-[60px] mb-4 animate-bounce`}></i>}
             {progressoRobo.status === 'concluido' && <i className="fas fa-check-circle text-[60px] text-emerald-500 mb-4 drop-shadow-md"></i>}
             {progressoRobo.status === 'cancelado' && <i className="fas fa-stop-circle text-[60px] text-amber-500 mb-4 drop-shadow-md"></i>}
@@ -1146,8 +1170,8 @@ export default function RegistrosTempo() {
 
       {/* 🧹 MODAL DA BORRACHA (CONFIGURAR LIMPEZA) */}
       {modalConfigLimpar && (
-        <div className="fixed inset-0 z-[9500] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl w-[500px] overflow-hidden flex flex-col">
+        <div className="fixed inset-0 z-[9500] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-[500px] overflow-hidden flex flex-col">
             <div className="bg-red-600 text-white p-4 flex justify-between items-center">
               <h3 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2"><i className="fas fa-eraser"></i> Borracha de Engenharia</h3>
               <button onClick={() => setModalConfigLimpar(false)} className="text-red-200 hover:text-white"><i className="fas fa-times"></i></button>
@@ -1158,12 +1182,12 @@ export default function RegistrosTempo() {
               <div className="space-y-4 mb-6 relative">
                 <div className="relative z-[9600]">
                   <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">Filtrar por Acabamento</label>
-                  <button onClick={(e) => { e.stopPropagation(); setDropdownLimpar(dropdownLimpar === 'acabamento' ? null : 'acabamento'); }} className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold text-slate-700 text-left flex justify-between items-center shadow-sm">
+                  <button onClick={(e) => { e.stopPropagation(); setDropdownLimpar(dropdownLimpar === 'acabamento' ? null : 'acabamento'); }} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs font-bold text-slate-700 text-left flex justify-between items-center shadow-sm">
                     <span>{limparFiltros.acabamento.length === 0 ? '-- Todos os Acabamentos --' : `${limparFiltros.acabamento.length} Selecionado(s)`}</span>
                     <i className={`fas fa-chevron-${dropdownLimpar === 'acabamento' ? 'up' : 'down'} opacity-50`}></i>
                   </button>
                   {dropdownLimpar === 'acabamento' && (
-                    <div className="absolute top-full left-0 mt-1 w-full bg-white border border-slate-200 shadow-xl rounded-md py-2 max-h-48 overflow-y-auto z-[9600]">
+                    <div className="absolute top-full left-0 mt-1 w-full bg-white border border-slate-200 shadow-xl rounded-lg py-2 max-h-48 overflow-y-auto z-[9600]">
                       {Array.from(new Set(skus.filter(s => s.dados_calculo != null).map(s => String(s.acabamento || '').toUpperCase()))).filter(Boolean).map(acab => (
                         <label key={acab} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer text-xs">
                           <input type="checkbox" checked={limparFiltros.acabamento.includes(acab)} onChange={() => toggleLimparFiltro(acab)} className="w-3.5 h-3.5 rounded text-red-600 focus:ring-red-500" />
@@ -1176,11 +1200,11 @@ export default function RegistrosTempo() {
 
                 <div>
                   <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">SKU Específico (Opcional)</label>
-                  <input type="text" placeholder="Digite para apagar um item exato..." value={limparFiltros.sku} onChange={(e) => setLimparFiltros({...limparFiltros, sku: e.target.value})} className="w-full border border-slate-300 rounded p-2 text-xs font-mono font-bold text-slate-700 bg-slate-50 focus:bg-white" />
+                  <input type="text" placeholder="Digite para apagar um item exato..." value={limparFiltros.sku} onChange={(e) => setLimparFiltros({...limparFiltros, sku: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 text-xs font-mono font-bold text-slate-800 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
                 </div>
               </div>
 
-              <div className="bg-red-50 border border-red-200 p-3 rounded text-center mb-6">
+              <div className="bg-red-50 border border-red-200 p-3 rounded-lg text-center mb-6">
                 <span className="block text-[10px] font-bold text-red-700 uppercase">Itens na mira para exclusão:</span>
                 <span className="block text-xl font-black text-red-900">
                   {alvosLimpeza.length} SKUs
@@ -1188,11 +1212,11 @@ export default function RegistrosTempo() {
               </div>
 
               <div className="flex justify-end gap-3">
-                <button onClick={() => setModalConfigLimpar(false)} className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded transition-colors">Cancelar</button>
+                <button onClick={() => setModalConfigLimpar(false)} className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">Cancelar</button>
                 <button 
                   onClick={limparCalculosDaFila} 
                   disabled={alvosLimpeza.length === 0}
-                  className="bg-red-600 hover:bg-red-700 disabled:bg-slate-400 text-white font-bold px-6 py-2 rounded shadow flex items-center gap-2 text-xs uppercase tracking-wide transition-colors"
+                  className="bg-red-600 hover:bg-red-700 disabled:bg-slate-400 text-white font-bold px-6 py-2 rounded-lg shadow-sm flex items-center gap-2 text-xs uppercase tracking-wide transition-colors"
                 >
                   <i className="fas fa-trash-alt"></i> Confirmar Exclusão
                 </button>
@@ -1207,7 +1231,7 @@ export default function RegistrosTempo() {
           <i className="fas fa-tags text-violet-400"></i>
           <span className="text-sm font-bold">{skusSelecionadosStatus.length} SKU{skusSelecionadosStatus.length > 1 ? 's' : ''} selecionado{skusSelecionadosStatus.length > 1 ? 's' : ''}</span>
           <select value={bulkStatusValue} onChange={e => setBulkStatusValue(e.target.value)}
-            className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm font-bold outline-none text-white">
+            className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm font-bold outline-none text-white">
             <option value="">-- Novo Status --</option>
             <option value="Em Análise">Em Análise</option>
             <option value="Aprovada">Aprovada</option>
@@ -1239,15 +1263,15 @@ export default function RegistrosTempo() {
 
         return (
           <>
-            <header className="mb-6 border-b border-slate-300 pb-3 flex justify-between items-end">
+            <header className="mb-6 border-b border-slate-200 pb-4 flex flex-col md:flex-row md:justify-between md:items-end gap-4">
               <div>
-                <h1 className="text-xl font-bold text-slate-800 uppercase tracking-wide">Painel Unificado de Lotes Industriais</h1>
-                <p className="text-sm text-slate-500 mt-1">Torre de controle operacional e status global de balanceamento de tempos.</p>
+                <h1 className="text-2xl font-black text-slate-900 tracking-tight">Painel Unificado de Lotes Industriais</h1>
+                <p className="text-sm text-slate-500 font-medium mt-1">Torre de controle operacional e status global de balanceamento de tempos.</p>
               </div>
-              <select 
-                value={filtroGraficaGlobal} 
-                onChange={(e) => setFiltroGraficaGlobal(e.target.value)} 
-                className="border border-slate-300 rounded-md p-2 text-sm font-bold text-slate-700 bg-white shadow-sm outline-none cursor-pointer"
+              <select
+                value={filtroGraficaGlobal}
+                onChange={(e) => setFiltroGraficaGlobal(e.target.value)}
+                className="border border-slate-200 rounded-lg p-2.5 text-sm font-medium text-slate-800 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all cursor-pointer w-full md:w-auto"
               >
                 <option value="">-- Filtrar por Gráfica (Todas) --</option>
                 {Array.from(new Set(lotesDisponiveis.map(l => String(l.grafica).toUpperCase()))).map(g => (
@@ -1256,22 +1280,22 @@ export default function RegistrosTempo() {
               </select>
             </header>
 
-            <div className="grid grid-cols-4 gap-4 mb-6">
-              <div className="bg-white border border-slate-200 p-4 rounded-md shadow-sm border-l-4 border-l-slate-800">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm border-l-4 border-l-slate-800">
                 <span className="text-[10px] uppercase font-bold text-slate-500 block">Total de SKUs na Fábrica</span>
                 <span className="text-lg font-black text-slate-800 block">{globalSkus} Itens Cadastrados</span>
                 <span className="text-xs text-amber-600 font-bold">{globalSkus - globalCalculados} Aguardando Engenharia</span>
               </div>
-              <div className="bg-white border border-slate-200 p-4 rounded-md shadow-sm border-l-4 border-l-blue-600">
+              <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm border-l-4 border-l-blue-600">
                 <span className="text-[10px] uppercase font-bold text-slate-500 block">SKUs Concluídos</span>
                 <span className="text-lg font-black text-emerald-700 block">{globalCalculados} Resolvidos</span>
                 <span className="text-xs text-slate-500">Progresso Geral: {globalSkus > 0 ? Math.round((globalCalculados / globalSkus) * 100) : 0}%</span>
               </div>
-              <div className="bg-white border border-slate-200 p-4 rounded-md shadow-sm border-l-4 border-l-purple-600">
+              <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm border-l-4 border-l-purple-600">
                 <span className="text-[10px] uppercase font-bold text-slate-500 block">Tiragem Total (Volume)</span>
                 <span className="text-lg font-black font-mono text-purple-900 block">{globalTiragem.toLocaleString('pt-BR')} exemplares</span>
               </div>
-              <div className="bg-white border border-slate-200 p-4 rounded-md shadow-sm border-l-4 border-l-emerald-600">
+              <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm border-l-4 border-l-emerald-600">
                 <span className="text-[10px] uppercase font-bold text-slate-500 block">Carga Total Homem-Hora</span>
                 <span className="text-lg font-black font-mono text-emerald-800 block">{decimalToTime(globalTempoDecimal)}</span>
               </div>
@@ -1285,7 +1309,7 @@ export default function RegistrosTempo() {
                 </span>
                 <div className="flex gap-3 items-center">
                   <select value={loteStatusValue} onChange={e => setLoteStatusValue(e.target.value)}
-                    className="bg-indigo-800 border border-indigo-600 rounded px-3 py-2 text-sm font-bold outline-none text-indigo-100 cursor-pointer">
+                    className="bg-indigo-800 border border-indigo-600 rounded-lg px-3 py-2 text-sm font-bold outline-none text-indigo-100 cursor-pointer">
                     <option value="">-- Status do Lote --</option>
                     <option value="Em Análise">Em Análise</option>
                     <option value="Aprovada">Aprovada</option>
@@ -1296,19 +1320,19 @@ export default function RegistrosTempo() {
                   <button
                     onClick={applyLoteBulkStatus}
                     disabled={!loteStatusValue || isApplyingLoteStatus}
-                    className="bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white font-bold px-4 py-2 rounded text-xs transition-colors flex items-center gap-2 uppercase tracking-wide">
+                    className="bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white font-bold px-4 py-2 rounded-lg text-xs transition-colors flex items-center gap-2 uppercase tracking-wide">
                     {isApplyingLoteStatus ? <><i className="fas fa-spinner fa-spin"></i> Aplicando...</> : <><i className="fas fa-tags"></i> Atualizar Status</>}
                   </button>
                   <button
                     onClick={() => processarLotesPorFora('apagar')}
                     disabled={carregandoLotes}
-                    className="bg-transparent border border-indigo-400 text-indigo-100 hover:bg-red-600 hover:border-red-600 hover:text-white font-bold px-4 py-2 rounded text-xs transition-colors flex items-center gap-2 disabled:opacity-50">
+                    className="bg-transparent border border-indigo-400 text-indigo-100 hover:bg-red-600 hover:border-red-600 hover:text-white font-bold px-4 py-2 rounded-lg text-xs transition-colors flex items-center gap-2 disabled:opacity-50">
                     <i className="fas fa-eraser"></i> Apagar Cálculos
                   </button>
                   <button
                     onClick={() => processarLotesPorFora('calcular')}
                     disabled={carregandoLotes}
-                    className="bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-black px-6 py-2 rounded shadow text-xs transition-colors flex items-center gap-2 uppercase tracking-wide disabled:opacity-50">
+                    className="bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-black px-6 py-2 rounded-lg shadow-sm text-xs transition-colors flex items-center gap-2 uppercase tracking-wide disabled:opacity-50">
                     {carregandoLotes ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-magic"></i>} 
                     Calcular em Massa
                   </button>
@@ -1316,9 +1340,9 @@ export default function RegistrosTempo() {
               </div>
             )}
 
-            <div className={`bg-white border border-slate-200 shadow-sm overflow-hidden w-full ${lotesSelecionados.length > 0 ? 'rounded-b-md' : 'rounded-md'}`}>
+            <div className={`bg-white border border-slate-200 shadow-sm overflow-hidden w-full ${lotesSelecionados.length > 0 ? 'rounded-b-xl' : 'rounded-xl'}`}>
               <table className="w-full text-left border-collapse text-sm">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase text-[10px] font-bold tracking-wider">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold tracking-wider">
                   <tr>
                     <th className="p-3 pl-4 w-10 text-center">
                       <input type="checkbox" checked={todosSelecionados} onChange={toggleTodosLotes} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer" />
@@ -1382,7 +1406,7 @@ export default function RegistrosTempo() {
                           <td className="p-3 text-right font-mono text-slate-600 cursor-pointer" onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>{Number(l.tiragem_total).toLocaleString('pt-BR')}</td>
                           <td className="p-3 text-center font-mono font-black text-blue-900 bg-blue-50/20 cursor-pointer" onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)}>{decimalToTime(l.tempo_total_decimal)}</td>
                           <td className="p-3 text-right pr-4">
-                            <button onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)} className="bg-blue-600 text-white px-4 py-1.5 rounded text-xs font-bold hover:bg-blue-700 shadow-sm transition-colors">
+                            <button onClick={() => carregarItensDoLote(l.filtro_producao, l.grafica)} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-700 shadow-sm transition-colors">
                               Abrir Fila
                             </button>
                           </td>
@@ -1460,7 +1484,7 @@ export default function RegistrosTempo() {
                                                 body: JSON.stringify({ grafica: sku.grafica, updates: [{ sku_alvo: sku.sku_alvo, filtro_producao: sku.lote, status_producao: newStatus }] })
                                               });
                                             }}
-                                              className={`text-[10px] font-bold border rounded px-2 py-0.5 outline-none cursor-pointer ${statusStyle}`}
+                                              className={`text-[10px] font-bold border rounded-lg px-2 py-0.5 outline-none cursor-pointer ${statusStyle}`}
                                             >
                                               <option value="">-- Status --</option>
                                               <option value="Em Análise">Em Análise</option>
@@ -1568,11 +1592,11 @@ export default function RegistrosTempo() {
 
         return (
           <>
-            <header className="mb-4 border-b border-slate-300 pb-3 flex justify-between items-end">
+            <header className="mb-4 border-b border-slate-200 pb-4 flex flex-col md:flex-row md:justify-between md:items-end gap-4">
               <div>
-                <h1 className="text-xl font-bold text-slate-800 uppercase tracking-wide">Fila de Produção</h1>
+                <h1 className="text-2xl font-black text-slate-900 tracking-tight">Fila de Produção</h1>
                 <div className="flex items-center gap-3 mt-1">
-                  <p className="text-sm text-slate-500 font-mono">Ref: {filtroProducao} / {grafica}</p>
+                  <p className="text-sm text-slate-500 font-medium font-mono">Ref: {filtroProducao} / {grafica}</p>
                   <select
                     value={statusProducao}
                     onChange={async (e) => {
@@ -1580,7 +1604,7 @@ export default function RegistrosTempo() {
                       setStatusProducao(novoStatus);
                       await fetch('/api/producao/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filtro_producao: filtroProducao, grafica, status_producao: novoStatus }) });
                     }}
-                    className={`text-xs font-bold border rounded px-2 py-1 outline-none cursor-pointer ${
+                    className={`text-xs font-bold border rounded-lg px-2 py-1 outline-none cursor-pointer ${
                       statusProducao === 'Em Análise' ? 'bg-orange-100 text-orange-800 border-orange-300' :
                       statusProducao === 'Aprovada' ? 'bg-blue-100 text-blue-800 border-blue-300' :
                       statusProducao === 'Em Produção' ? 'bg-yellow-100 text-yellow-800 border-yellow-300' :
@@ -1600,11 +1624,11 @@ export default function RegistrosTempo() {
               </div>
               <div className="flex gap-2">
                 <div className="relative">
-                  <button onClick={() => setShowCsvDropdown(v => !v)} className="text-sm text-teal-700 font-bold border border-teal-200 px-4 py-1.5 rounded hover:bg-teal-50 shadow-sm transition-colors flex items-center gap-2">
+                  <button onClick={() => setShowCsvDropdown(v => !v)} className="text-sm text-teal-700 font-bold border border-teal-200 px-4 py-1.5 rounded-lg hover:bg-teal-50 shadow-sm transition-colors flex items-center gap-2">
                     <i className="fas fa-file-csv mr-1"></i> Exportar CSV <i className="fas fa-chevron-down text-xs opacity-60"></i>
                   </button>
                   {showCsvDropdown && (
-                    <div className="absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded shadow-xl z-50 min-w-[220px]">
+                    <div className="absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-50 min-w-[220px]">
                       <button onClick={() => { exportarTemposCSV(); setShowCsvDropdown(false); }} className="w-full text-left px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 border-b">
                         <i className="fas fa-list mr-2 text-teal-600"></i> Por Etapas (detalhado)
                       </button>
@@ -1615,27 +1639,27 @@ export default function RegistrosTempo() {
                   )}
                 </div>
                 {skusConcluidosLote > 0 && (
-                  <button onClick={() => { setLimparFiltros({ acabamento: [], sku: '' }); setModalConfigLimpar(true); }} className="text-sm text-red-600 font-bold border border-red-200 px-4 py-1.5 rounded hover:bg-red-50 shadow-sm transition-colors">
+                  <button onClick={() => { setLimparFiltros({ acabamento: [], sku: '' }); setModalConfigLimpar(true); }} className="text-sm text-red-600 font-bold border border-red-200 px-4 py-1.5 rounded-lg hover:bg-red-50 shadow-sm transition-colors">
                     <i className="fas fa-eraser mr-1"></i> Borracha de Engenharia
                   </button>
                 )}
-                <button onClick={() => { setEtapa(1); carregarFiltrosIniciais(); setLotesSelecionados([]); }} className="text-sm text-blue-600 font-bold border border-blue-200 px-4 py-1.5 rounded hover:bg-blue-50 shadow-sm transition-colors">
+                <button onClick={() => { setEtapa(1); carregarFiltrosIniciais(); setLotesSelecionados([]); }} className="text-sm text-blue-600 font-bold border border-blue-200 px-4 py-1.5 rounded-lg hover:bg-blue-50 shadow-sm transition-colors">
                   Voltar aos Lotes
                 </button>
               </div>
             </header>
 
-            <div className="grid grid-cols-4 gap-4 mb-6">
-              <div className="bg-white border border-slate-200 p-4 rounded-md shadow-sm border-l-4 border-l-slate-800">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm border-l-4 border-l-slate-800">
                 <span className="text-[10px] uppercase font-bold text-slate-500 block">Itens (SKUs)</span>
                 <span className="text-lg font-black text-slate-800 block">{totalSkusLote} Produtos</span>
                 <span className="text-xs text-amber-600 font-bold">{skusRestantesLote} Pendentes</span>
               </div>
-              <div className="bg-white border border-slate-200 p-4 rounded-md shadow-sm border-l-4 border-l-blue-600">
+              <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm border-l-4 border-l-blue-600">
                 <span className="text-[10px] uppercase font-bold text-slate-500 block">Tiragem Total do Lote</span>
                 <span className="text-lg font-black font-mono text-blue-800 block">{tiragemLote.toLocaleString('pt-BR')} ex.</span>
               </div>
-              <div className="bg-white border border-slate-200 p-4 rounded-md shadow-sm border-l-4 border-l-emerald-600 col-span-2">
+              <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm border-l-4 border-l-emerald-600 col-span-2">
                 <span className="text-[10px] uppercase font-bold text-slate-500 block">Estimativa de Carga Consolidada</span>
                 <span className="text-xl font-black font-mono text-emerald-800 block">{decimalToTime(tempoDecimalTotal)}</span>
                 <span className="text-xs text-slate-500">Soma de todo o fluxo produtivo (Miolo + Capas + Encartes + Acabamentos).</span>
@@ -1652,15 +1676,15 @@ export default function RegistrosTempo() {
                 <div className="p-5">
                   <p className="text-xs text-indigo-800 mb-4 font-medium">O robô irá processar os itens alvo seguindo a engenharia física de cada um (incluindo cálculo de Capas, Guardas, Encartes e Beneficiamento). <strong>Se a máquina for deixada em branco, ele alocará o serviço para a máquina mais rápida disponível.</strong></p>
                   
-                  <div className="flex gap-4 mb-4 pb-4 border-b border-indigo-200 relative z-[8100]">
+                  <div className="flex flex-col md:flex-row gap-4 mb-4 pb-4 border-b border-indigo-200 relative z-[8100]">
                     <div className="flex-1 relative">
                       <label className="block text-[10px] font-bold text-indigo-800 uppercase mb-1">Filtrar por Acabamento</label>
-                      <button onClick={(e) => { e.stopPropagation(); setDropdownRobo(dropdownRobo === 'acabamento' ? null : 'acabamento'); }} className="w-full bg-white border border-indigo-300 rounded p-2 text-xs font-bold text-slate-700 text-left flex justify-between items-center shadow-sm">
+                      <button onClick={(e) => { e.stopPropagation(); setDropdownRobo(dropdownRobo === 'acabamento' ? null : 'acabamento'); }} className="w-full bg-white border border-indigo-300 rounded-lg p-2.5 text-xs font-bold text-slate-700 text-left flex justify-between items-center shadow-sm">
                         <span>{roboFiltros.acabamento.length === 0 ? '-- Todos os Acabamentos --' : `${roboFiltros.acabamento.length} Selecionado(s)`}</span>
                         <i className={`fas fa-chevron-${dropdownRobo === 'acabamento' ? 'up' : 'down'} opacity-50`}></i>
                       </button>
                       {dropdownRobo === 'acabamento' && (
-                        <div className="absolute top-full left-0 mt-1 w-full bg-white border border-indigo-200 shadow-xl rounded-md py-2 max-h-48 overflow-y-auto z-50">
+                        <div className="absolute top-full left-0 mt-1 w-full bg-white border border-indigo-200 shadow-xl rounded-lg py-2 max-h-48 overflow-y-auto z-50">
                           {opcoesAcabRobo.map(acab => (
                             <label key={acab} className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-50 cursor-pointer text-xs">
                               <input type="checkbox" checked={roboFiltros.acabamento.includes(acab)} onChange={() => toggleRoboFiltro('acabamento', acab)} className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500" />
@@ -1673,12 +1697,12 @@ export default function RegistrosTempo() {
 
                     <div className="flex-1 relative">
                       <label className="block text-[10px] font-bold text-indigo-800 uppercase mb-1">Filtrar por Espessura (Lombada)</label>
-                      <button onClick={(e) => { e.stopPropagation(); setDropdownRobo(dropdownRobo === 'lombada' ? null : 'lombada'); }} className="w-full bg-white border border-indigo-300 rounded p-2 text-xs font-bold text-slate-700 text-left flex justify-between items-center shadow-sm">
+                      <button onClick={(e) => { e.stopPropagation(); setDropdownRobo(dropdownRobo === 'lombada' ? null : 'lombada'); }} className="w-full bg-white border border-indigo-300 rounded-lg p-2.5 text-xs font-bold text-slate-700 text-left flex justify-between items-center shadow-sm">
                         <span>{roboFiltros.lombada.length === 0 ? '-- Todas as Lombadas --' : `${roboFiltros.lombada.length} Selecionada(s)`}</span>
                         <i className={`fas fa-chevron-${dropdownRobo === 'lombada' ? 'up' : 'down'} opacity-50`}></i>
                       </button>
                       {dropdownRobo === 'lombada' && (
-                        <div className="absolute top-full left-0 mt-1 w-full bg-white border border-indigo-200 shadow-xl rounded-md py-2 max-h-48 overflow-y-auto z-50">
+                        <div className="absolute top-full left-0 mt-1 w-full bg-white border border-indigo-200 shadow-xl rounded-lg py-2 max-h-48 overflow-y-auto z-50">
                           {opcoesLombRobo.map(lomb => (
                             <label key={lomb} className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-50 cursor-pointer text-xs">
                               <input type="checkbox" checked={roboFiltros.lombada.includes(lomb)} onChange={() => toggleRoboFiltro('lombada', lomb)} className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500" />
@@ -1689,8 +1713,8 @@ export default function RegistrosTempo() {
                       )}
                     </div>
 
-                    <div className="w-48 flex flex-col justify-end">
-                      <div className="bg-indigo-100 border border-indigo-300 rounded p-2 text-center relative shadow-sm">
+                    <div className="w-full md:w-48 flex flex-col justify-end">
+                      <div className="bg-indigo-100 border border-indigo-300 rounded-lg p-2 text-center relative shadow-sm">
                         {(roboFiltros.acabamento.length > 0 || roboFiltros.lombada.length > 0) && (
                           <button onClick={() => setRoboFiltros({acabamento: [], lombada: []})} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] hover:bg-red-600 shadow" title="Limpar Filtros"><i className="fas fa-times"></i></button>
                         )}
@@ -1700,66 +1724,66 @@ export default function RegistrosTempo() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-5 gap-4 mb-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-5">
                     <div>
                       <label className="block text-[10px] font-bold text-indigo-700 uppercase mb-1">Imp. Miolo</label>
-                      <select value={robo.impressao} onChange={e => setRobo({...robo, impressao: e.target.value})} className="w-full border border-indigo-300 rounded p-2 text-xs font-bold text-slate-700 bg-white">
+                      <select value={robo.impressao} onChange={e => setRobo({...robo, impressao: e.target.value})} className="w-full border border-indigo-300 rounded-lg p-2.5 text-xs font-bold text-slate-700 bg-white">
                         <option value="">Automático...</option>
                         {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('impressão')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo} ({mq.maq_cores || mq.cores || '?'} Cores)</option>)}
                       </select>
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-indigo-700 uppercase mb-1">Imp. Capas</label>
-                      <select value={robo.impressaoCapa} onChange={e => setRobo({...robo, impressaoCapa: e.target.value})} className="w-full border border-indigo-300 rounded p-2 text-xs font-bold text-slate-700 bg-white">
+                      <select value={robo.impressaoCapa} onChange={e => setRobo({...robo, impressaoCapa: e.target.value})} className="w-full border border-indigo-300 rounded-lg p-2.5 text-xs font-bold text-slate-700 bg-white">
                         <option value="">Automático...</option>
                         {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('impressão')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo} ({mq.maq_cores || mq.cores || '?'} Cores)</option>)}
                       </select>
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-indigo-700 uppercase mb-1">Imp. Encarte/Adesivo</label>
-                      <select value={robo.impressaoEncarte} onChange={e => setRobo({...robo, impressaoEncarte: e.target.value, impressaoAdesivo: e.target.value})} className="w-full border border-indigo-300 rounded p-2 text-xs font-bold text-slate-700 bg-white">
+                      <select value={robo.impressaoEncarte} onChange={e => setRobo({...robo, impressaoEncarte: e.target.value, impressaoAdesivo: e.target.value})} className="w-full border border-indigo-300 rounded-lg p-2.5 text-xs font-bold text-slate-700 bg-white">
                         <option value="">Automático...</option>
                         {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('impressão')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo} ({mq.maq_cores || mq.cores || '?'} Cores)</option>)}
                       </select>
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-indigo-700 uppercase mb-1">Laminação / Verniz</label>
-                      <select value={robo.benefCapa} onChange={e => setRobo({...robo, benefCapa: e.target.value})} className="w-full border border-indigo-300 rounded p-2 text-xs font-bold text-slate-700 bg-white">
+                      <select value={robo.benefCapa} onChange={e => setRobo({...robo, benefCapa: e.target.value})} className="w-full border border-indigo-300 rounded-lg p-2.5 text-xs font-bold text-slate-700 bg-white">
                         <option value="">Automático...</option>
                         {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('beneficiamento')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo}</option>)}
                       </select>
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-indigo-700 uppercase mb-1">Empastamento</label>
-                      <select value={robo.empastCapa} onChange={e => setRobo({...robo, empastCapa: e.target.value})} className="w-full border border-indigo-300 rounded p-2 text-xs font-bold text-slate-700 bg-white">
+                      <select value={robo.empastCapa} onChange={e => setRobo({...robo, empastCapa: e.target.value})} className="w-full border border-indigo-300 rounded-lg p-2.5 text-xs font-bold text-slate-700 bg-white">
                         <option value="">Automático...</option>
                         {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('empastamento')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo}</option>)}
                       </select>
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-indigo-700 uppercase mb-1">Corte e Vinco</label>
-                      <select value={robo.corteVinco} onChange={e => setRobo({...robo, corteVinco: e.target.value})} className="w-full border border-indigo-300 rounded p-2 text-xs font-bold text-slate-700 bg-white">
+                      <select value={robo.corteVinco} onChange={e => setRobo({...robo, corteVinco: e.target.value})} className="w-full border border-indigo-300 rounded-lg p-2.5 text-xs font-bold text-slate-700 bg-white">
                         <option value="">Automático...</option>
                         {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('corte')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo}</option>)}
                       </select>
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-indigo-700 uppercase mb-1">Dobradeira Padrão</label>
-                      <select value={robo.dobra} onChange={e => setRobo({...robo, dobra: e.target.value})} className="w-full border border-indigo-300 rounded p-2 text-xs font-bold text-slate-700 bg-white">
+                      <select value={robo.dobra} onChange={e => setRobo({...robo, dobra: e.target.value})} className="w-full border border-indigo-300 rounded-lg p-2.5 text-xs font-bold text-slate-700 bg-white">
                         <option value="">Automático...</option>
                         {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('dobra')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo}</option>)}
                       </select>
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-indigo-700 uppercase mb-1">Alceadeira Padrão</label>
-                      <select value={robo.alceadeira} onChange={e => setRobo({...robo, alceadeira: e.target.value})} className="w-full border border-indigo-300 rounded p-2 text-xs font-bold text-slate-700 bg-white">
+                      <select value={robo.alceadeira} onChange={e => setRobo({...robo, alceadeira: e.target.value})} className="w-full border border-indigo-300 rounded-lg p-2.5 text-xs font-bold text-slate-700 bg-white">
                         <option value="">Automático...</option>
                         {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('alceadeira')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo}</option>)}
                       </select>
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-indigo-700 uppercase mb-1">Grampeadeira Padrão</label>
-                      <select value={robo.grampo} onChange={e => setRobo({...robo, grampo: e.target.value})} className="w-full border border-indigo-300 rounded p-2 text-xs font-bold text-slate-700 bg-white">
+                      <select value={robo.grampo} onChange={e => setRobo({...robo, grampo: e.target.value})} className="w-full border border-indigo-300 rounded-lg p-2.5 text-xs font-bold text-slate-700 bg-white">
                         <option value="">Automático...</option>
                         {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('grampo') || String(m.tipo || '').toLowerCase().includes('canoa')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo}</option>)}
                       </select>
@@ -1768,7 +1792,7 @@ export default function RegistrosTempo() {
                   </div>
 
                   <div className="flex justify-end">
-                    <button onClick={() => executarAutomacaoEmMassa(false)} disabled={skusAlvoRobo.length === 0} className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white font-bold px-6 py-2 rounded shadow flex items-center gap-2 text-xs uppercase tracking-wide transition-colors">
+                    <button onClick={() => executarAutomacaoEmMassa(false)} disabled={skusAlvoRobo.length === 0} className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white font-bold px-6 py-2 rounded-lg shadow-sm flex items-center gap-2 text-xs uppercase tracking-wide transition-colors">
                       <i className="fas fa-magic"></i> Calcular {skusAlvoRobo.length} Item(s) Automático
                     </button>
                   </div>
@@ -1776,9 +1800,9 @@ export default function RegistrosTempo() {
               </div>
             )}
 
-            <div className="bg-white border border-slate-200 rounded-md shadow-sm w-full overflow-x-auto">
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm w-full overflow-x-auto">
               <table className="w-full text-left border-collapse text-sm whitespace-nowrap">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase text-[10px] font-bold">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold">
                   <tr>
                     <th className="p-3 pl-4 w-12 text-center">Abrir</th>
                     <th className="p-3 w-32">SKU Produto</th>
@@ -1896,58 +1920,81 @@ export default function RegistrosTempo() {
 
       {/* ETAPA 3: DETALHAMENTO DA O.S. MANUAL */}
       {etapa === 3 && osAtual && (() => {
+        // HISTÓRICO: ao abrir um item já calculado, mostramos o cálculo SALVO
+        // (não recalculamos) enquanto a máquina selecionada continuar sendo a
+        // mesma que foi gravada. Se o usuário trocar qualquer máquina, aquele
+        // trecho volta a ser recalculado ao vivo.
+        const dadosSalvos: any = (osAtual as any).dados_calculo || null;
+        // Retorna o snapshot salvo (mesma estrutura do cálculo ao vivo) enquanto
+        // TODAS as máquinas informadas continuarem iguais às gravadas; caso
+        // contrário recalcula ao vivo via `calcular`.
+        const usarSalvo = <T,>(chave: string, calcular: () => T, ...pares: [string, any][]): T => {
+          if (!dadosSalvos) return calcular();
+          const bloco = dadosSalvos[chave];
+          if (!bloco || !bloco.resultado) return calcular();
+          for (const [campo, valor] of pares) {
+            if (String(bloco[campo] ?? '') !== String(valor ?? '')) return calcular();
+          }
+          return bloco.resultado as T;
+        };
+
         const maqImpressao = maquinasCargadas.find(m => String(m.id) === String(idMaquinaImpressao || ''));
-        const analiseImpressao = calcularImpressao(maqImpressao, Number(osAtual.paginacao), Number(osAtual.tiragem));
+        const analiseImpressao = usarSalvo('impressao', () => calcularImpressao(maqImpressao, Number(osAtual.paginacao), Number(osAtual.tiragem)), ['maquina_id', idMaquinaImpressao]);
+        // "Só acabamento": sem impressora, o acabamento usa a base PADRÃO (fórmula fixa:
+        // 16 pgs/caderno + tiragem de quebra padrão). Quando há impressora, a base é a
+        // própria análise de impressão (comportamento inalterado).
+        const semImpressao = !analiseImpressao;
+        const baseAcabamento = analiseImpressao || calcularBaseAcabamentoPadrao(Number(osAtual.paginacao), Number(osAtual.tiragem));
         const tProduzidaCabecalho = analiseImpressao ? analiseImpressao.parametros.tiragemProduzida : Math.round(Number(osAtual.tiragem) + 175 + (Number(osAtual.tiragem) * 0.06));
 
         const capasDoItem = capasDoLote.filter(c => String(c.sku_ref) === String(osAtual.sku_miolo));
         const exigeCapa = capasDoItem.length > 0;
         const maqImpCapa = maquinasCargadas.find(m => String(m.id) === String(idMaquinaImpressaoCapa || ''));
-        const analiseImpCapa = exigeCapa ? calcularImpressaoCapa(maqImpCapa, capasDoItem, Number(osAtual.tiragem)) : null;
+        const analiseImpCapa = exigeCapa ? usarSalvo('impressao_capa', () => calcularImpressaoCapa(maqImpCapa, capasDoItem, Number(osAtual.tiragem)), ['maquina_id', idMaquinaImpressaoCapa]) : null;
 
         const exigeBeneficiamento = capasDoItem.some(c => {
           const b = String(c.beneficiamento || '').toUpperCase();
           return b.includes('LAMINAÇÃO') || b.includes('VERNIZ');
         });
         const maqBenCapa = maquinasCargadas.find(m => String(m.id) === String(idMaquinaBeneficiamentoCapa || ''));
-        const analiseBenCapa = exigeBeneficiamento ? calcularBeneficiamentoCapa(maqBenCapa, capasDoItem, Number(osAtual.tiragem), maqImpCapa) : null;
+        const analiseBenCapa = exigeBeneficiamento ? usarSalvo('beneficiamento_capa', () => calcularBeneficiamentoCapa(maqBenCapa, capasDoItem, Number(osAtual.tiragem), maqImpCapa), ['maquina_id', idMaquinaBeneficiamentoCapa]) : null;
 
         const exigeEmpastamento = capasDoItem.some(c => String(c.tipo_capa || '').toUpperCase().includes('DURA'));
         const maqEmpCapa = maquinasCargadas.find(m => String(m.id) === String(idMaquinaEmpastamentoCapa || ''));
-        const analiseEmpCapa = exigeEmpastamento ? calcularEmpastamentoCapa(maqEmpCapa, capasDoItem, Number(osAtual.tiragem), maqImpCapa) : null;
+        const analiseEmpCapa = exigeEmpastamento ? usarSalvo('empastamento_capa', () => calcularEmpastamentoCapa(maqEmpCapa, capasDoItem, Number(osAtual.tiragem), maqImpCapa), ['maquina_id', idMaquinaEmpastamentoCapa]) : null;
 
         // CALCULOS DE ENCARTE
         const encarteItem = encartesDoLote.find(e => String(e.sku_miolo) === String(osAtual.sku_miolo));
         
         const exigeEncarte = encarteItem && Number(encarteItem.paginacao_encarte) > 0;
         const maqImpEncarte = maquinasCargadas.find(m => String(m.id) === String(idMaquinaImpressaoEncarte || ''));
-        const analiseImpEncarte = exigeEncarte ? calcularImpressao(maqImpEncarte, Number(encarteItem.paginacao_encarte), Number(encarteItem.tiragem || osAtual.tiragem)) : null;
+        const analiseImpEncarte = exigeEncarte ? usarSalvo('impressao_encarte', () => calcularImpressao(maqImpEncarte, Number(encarteItem.paginacao_encarte), Number(encarteItem.tiragem || osAtual.tiragem)), ['maquina_id', idMaquinaImpressaoEncarte]) : null;
 
         const exigeAdesivo = encarteItem && Number(encarteItem.paginacao_adesivo) > 0;
         const maqImpAdesivo = maquinasCargadas.find(m => String(m.id) === String(idMaquinaImpressaoAdesivo || ''));
-        const analiseImpAdesivo = exigeAdesivo ? calcularImpressao(maqImpAdesivo, Number(encarteItem.paginacao_adesivo), Number(encarteItem.tiragem || osAtual.tiragem)) : null;
+        const analiseImpAdesivo = exigeAdesivo ? usarSalvo('impressao_adesivo', () => calcularImpressao(maqImpAdesivo, Number(encarteItem.paginacao_adesivo), Number(encarteItem.tiragem || osAtual.tiragem)), ['maquina_id', idMaquinaImpressaoAdesivo]) : null;
 
         const exigeCorteVinco = encarteItem && (String(encarteItem.corte_vinco_encarte || '').toLowerCase() === 'sim' || String(encarteItem.corte_vinco_adesivo || '').toLowerCase() === 'sim');
         const maqCorteVinco = maquinasCargadas.find(m => String(m.id) === String(idMaquinaCorteVinco || ''));
-        const analiseCorteVinco = exigeCorteVinco ? calcularCorteVinco(maqCorteVinco, analiseImpEncarte, analiseImpAdesivo, encarteItem) : null;
+        const analiseCorteVinco = exigeCorteVinco ? usarSalvo('corte_vinco', () => calcularCorteVinco(maqCorteVinco, analiseImpEncarte, analiseImpAdesivo, encarteItem), ['maquina_id', idMaquinaCorteVinco]) : null;
 
         const maqDobra = maquinasCargadas.find(m => String(m.id) === String(idMaquinaDobra || ''));
-        const analiseDobra = calcularDobra(maqDobra, analiseImpressao, maqImpressao, Number(osAtual.paginacao) || 0);
+        const analiseDobra = usarSalvo('dobra', () => calcularDobra(maqDobra, baseAcabamento, maqImpressao, Number(osAtual.paginacao) || 0), ['maquina_id', idMaquinaDobra]);
 
         const acabamento = String(osAtual.acabamento || '').toUpperCase();
         
         const exigeAlceamento = acabamento.includes('LOMBADA') || acabamento.includes('PUR') || acabamento.includes('ESPIRAL') || acabamento.includes('WIRE-O');
         const maqAlceadeira = maquinasCargadas.find(m => String(m.id) === String(idMaquinaAlceadeira || ''));
-        const analiseAlceamento = exigeAlceamento ? calcularAlceamento(maqAlceadeira, analiseImpressao, maqImpressao) : null;
+        const analiseAlceamento = exigeAlceamento ? usarSalvo('alceamento', () => calcularAlceamento(maqAlceadeira, baseAcabamento, maqImpressao), ['maquina_id', idMaquinaAlceadeira]) : null;
 
         const exigeGrampo = acabamento.includes('CANOA') || acabamento.includes('GRAMPO');
         const maqGrampo = maquinasCargadas.find(m => String(m.id) === String(idMaquinaGrampo || ''));
-        const analiseGrampo = exigeGrampo ? calcularGrampo(maqGrampo, analiseImpressao, Number(osAtual.paginacao) || 0, maqImpressao) : null;
+        const analiseGrampo = exigeGrampo ? usarSalvo('grampo', () => calcularGrampo(maqGrampo, baseAcabamento, Number(osAtual.paginacao) || 0, maqImpressao), ['maquina_id', idMaquinaGrampo]) : null;
 
         const exigeEspiral = acabamento.includes('ESPIRAL') || acabamento.includes('WIRE-O');
         const maqFuracao = maquinasCargadas.find(m => String(m.id) === String(idMaquinaFuracao || ''));
         const maqEspiral = maquinasCargadas.find(m => String(m.id) === String(idMaquinaEspiral || ''));
-        const analiseEspiral = exigeEspiral ? calcularEspiral(maqFuracao, maqEspiral, analiseImpressao, Number(osAtual.paginacao), osAtual.lombada) : null;
+        const analiseEspiral = exigeEspiral ? usarSalvo('espiral', () => calcularEspiral(maqFuracao, maqEspiral, baseAcabamento, Number(osAtual.paginacao), osAtual.lombada), ['maquina_furacao_id', idMaquinaFuracao], ['maquina_espiral_id', idMaquinaEspiral]) : null;
 
         const totalSkusLote = skus.length;
         const skusConcluidosLote = skus.filter(s => s.dados_calculo != null).length;
@@ -1963,7 +2010,7 @@ export default function RegistrosTempo() {
                   Lote: {filtroProducao} | Progresso Lote: <span className="text-emerald-400 font-bold">{skusConcluidosLote} de {totalSkusLote}</span> calculados ({skusRestantesLote} restantes)
                 </p>
               </div>
-              <button onClick={() => { setEtapa(2); carregarItensDoLote(filtroProducao, grafica); }} className="bg-slate-700 border border-slate-600 hover:bg-slate-600 text-xs font-bold px-4 py-2 rounded transition-colors shadow-sm">Voltar para a Fila</button>
+              <button onClick={() => { setEtapa(2); carregarItensDoLote(filtroProducao, grafica); }} className="bg-slate-700 border border-slate-600 hover:bg-slate-600 text-xs font-bold px-4 py-2 rounded-lg transition-colors shadow-sm">Voltar para a Fila</button>
             </div>
 
             {/* GRID PRINCIPAL (MIOLO) */}
@@ -1990,11 +2037,28 @@ export default function RegistrosTempo() {
               </div>
             </div>
 
+            {/* AVISO: CÁLCULO SÓ COM ACABAMENTO (SEM IMPRESSORA) */}
+            {semImpressao && (
+              <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 shadow-sm mb-6 flex items-start gap-3">
+                <i className="fas fa-triangle-exclamation text-amber-500 text-lg mt-0.5"></i>
+                <div className="text-xs text-amber-900 leading-relaxed">
+                  <span className="font-black uppercase tracking-wide">Sem impressora selecionada — usando base padrão de acabamento.</span>
+                  <p className="mt-1">
+                    Como você não escolheu uma máquina de impressão, o acabamento está sendo dimensionado por uma
+                    <span className="font-bold"> estimativa fixa</span>:
+                    <span className="font-bold"> 16 páginas por caderno</span> e
+                    <span className="font-bold"> tiragem de quebra padrão</span> ({tProduzidaCabecalho.toLocaleString('pt-BR')} ex.).
+                    Os tempos são aproximados. Para o dimensionamento exato dos cadernos, selecione a impressora do miolo abaixo.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* RAIO-X DE CAPAS E EXTRAS */}
             {(exigeCapa || exigeEncarte || exigeAdesivo) && (
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-4 shadow-sm mb-6">
                 {exigeCapa && (
-                  <div className="bg-indigo-50/50 border border-indigo-100 p-3 rounded md:col-span-1">
+                  <div className="bg-indigo-50/50 border border-indigo-100 p-3 rounded-lg md:col-span-1">
                     <span className="block text-[10px] font-bold text-indigo-800 uppercase mb-2">Estrutura de Capas ({capasDoItem.length})</span>
                     <ul className="space-y-2">
                       {capasDoItem.map((c, i) => (
@@ -2009,7 +2073,7 @@ export default function RegistrosTempo() {
                 )}
                 
                 {(exigeEncarte || exigeAdesivo) && (
-                  <div className="bg-teal-50/50 border border-teal-100 p-3 rounded md:col-span-2 flex flex-col justify-center">
+                  <div className="bg-teal-50/50 border border-teal-100 p-3 rounded-lg md:col-span-2 flex flex-col justify-center">
                     <span className="block text-[10px] font-bold text-teal-800 uppercase mb-2">Itens Extras Acoplados</span>
                     <div className="flex gap-8">
                       {exigeEncarte && (
@@ -2043,7 +2107,7 @@ export default function RegistrosTempo() {
                 <div className="p-4 space-y-6">
                   
                   {/* 1.1 Impressão Miolo */}
-                  <div className="border border-slate-200 rounded-md p-4 bg-slate-50/30">
+                  <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/30">
                     <div className="flex justify-between items-center mb-3">
                       <h4 className="text-xs font-black uppercase text-blue-900 tracking-wider">1.1 Impressão de Miolo</h4>
                       <div className="flex items-center gap-2 relative">
@@ -2052,7 +2116,7 @@ export default function RegistrosTempo() {
                         </button>
                         {tooltipAtivo === 'impMiolo' && (
                           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[540px] bg-slate-950 text-white text-xs rounded-lg shadow-xl p-5 z-[9500] border border-slate-700 leading-relaxed animate-in zoom-in-95 duration-150 cursor-default" onClick={(e) => e.stopPropagation()}>
-                            <div className="border-b border-slate-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-amber-400 font-mono text-[11px]">Memorial de Cálculo: Imp. Miolo</h4><button onClick={() => setTooltipAtivo(null)} className="text-gray-400 hover:text-white font-bold">X</button></div>
+                            <div className="border-b border-slate-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-amber-400 font-mono text-[11px]">Memorial de Cálculo: Imp. Miolo</h4><button onClick={() => setTooltipAtivo(null)} className="text-slate-400 hover:text-white font-bold">X</button></div>
                             <div className="space-y-3 text-slate-300 font-normal normal-case">
                               <p><strong>1. Tiragem com Quebra:</strong> O sistema identifica se a máquina é <strong>Offset</strong> (Tiragem + 175 folhas + 6%) ou <strong>Digital</strong> (Tiragem + 22 folhas + 5%). Total Carga Real = <strong>{analiseImpressao?.parametros.tiragemProduzida.toLocaleString('pt-BR')} folhas</strong>.</p>
                               <p><strong>2. Regra Físicas de Cores (Passadas):</strong> A impressora alocada tem {analiseImpressao?.parametros.qtdCores} cores. Como ela imprime apenas de um lado por vez, o papel precisa passar <strong>{analiseImpressao?.parametros.passadas} vezes</strong> por dentro dela (Frente e depois Verso). Logo, o número de giros e setups dobra automaticamente!</p>
@@ -2063,13 +2127,13 @@ export default function RegistrosTempo() {
                       </div>
                     </div>
                     
-                    <select value={idMaquinaImpressao} onChange={(e) => setIdMaquinaImpressao(e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm font-bold text-slate-700 bg-white mb-3">
+                    <select value={idMaquinaImpressao} onChange={(e) => setIdMaquinaImpressao(e.target.value)} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-700 bg-white mb-3">
                       <option value="">Selecione o equipamento do miolo...</option>
                       {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('impressão')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo} ({mq.maq_cores || mq.cores || '?'} Cores)</option>)}
                     </select>
                     
                     {analiseImpressao && (
-                      <div className="mb-3 bg-slate-100 border border-slate-200 p-2 rounded text-[11px] flex gap-6 font-bold text-slate-600 uppercase tracking-wide">
+                      <div className="mb-3 bg-slate-100 border border-slate-200 p-2 rounded-lg text-[11px] flex gap-6 font-bold text-slate-600 uppercase tracking-wide">
                         <span>Velocidade: <span className="text-blue-700 font-mono">{analiseImpressao.parametros.velocidade.toLocaleString('pt-BR')} giros/h</span></span>
                         <span>Tempo de Setup Unitário: <span className="text-amber-700 font-mono">{analiseImpressao.maquinaSetupStr}</span></span>
                       </div>
@@ -2101,7 +2165,7 @@ export default function RegistrosTempo() {
 
                   {/* 1.2 Impressão Capas */}
                   {exigeCapa && (
-                    <div className="border border-slate-200 rounded-md p-4 bg-indigo-50/10">
+                    <div className="border border-slate-200 rounded-lg p-4 bg-indigo-50/10">
                       <div className="flex justify-between items-center mb-3">
                         <h4 className="text-xs font-black uppercase text-indigo-900 tracking-wider">1.2 Impressão de Capas</h4>
                         <div className="flex items-center gap-2 relative">
@@ -2110,7 +2174,7 @@ export default function RegistrosTempo() {
                           </button>
                           {tooltipAtivo === 'impCapa' && (
                             <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[540px] bg-slate-950 text-white text-xs rounded-lg shadow-xl p-5 z-[9500] border border-indigo-700 leading-relaxed animate-in zoom-in-95 duration-150 cursor-default" onClick={(e) => e.stopPropagation()}>
-                              <div className="border-b border-indigo-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-indigo-400 font-mono text-[11px]">Memorial de Cálculo: Capas</h4><button onClick={() => setTooltipAtivo(null)} className="text-gray-400 hover:text-white font-bold">X</button></div>
+                              <div className="border-b border-indigo-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-indigo-400 font-mono text-[11px]">Memorial de Cálculo: Capas</h4><button onClick={() => setTooltipAtivo(null)} className="text-slate-400 hover:text-white font-bold">X</button></div>
                               <div className="space-y-3 text-slate-300 font-normal normal-case">
                                 <p><strong>1. Capa Simples:</strong> Roda em 4 poses. Se a capa tiver impressão no verso (ex: 4x4) e a máquina for de 4 cores, ela passa duas vezes na máquina (gera 2 setups).</p>
                                 <p><strong>2. Capa Dura:</strong> Roda em 2 poses porque precisa de sobra para revestir o papelão. Se tiver impressão no verso, essa impressão é feita separada (a Guarda). A guarda roda em 4 poses, exigindo um setup e giros independentes.</p>
@@ -2120,13 +2184,13 @@ export default function RegistrosTempo() {
                         </div>
                       </div>
 
-                      <select value={idMaquinaImpressaoCapa} onChange={(e) => setIdMaquinaImpressaoCapa(e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm font-bold text-slate-700 bg-white mb-3">
+                      <select value={idMaquinaImpressaoCapa} onChange={(e) => setIdMaquinaImpressaoCapa(e.target.value)} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-700 bg-white mb-3">
                         <option value="">Selecione o equipamento das capas...</option>
                         {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('impressão')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo} ({mq.maq_cores || mq.cores || '?'} Cores)</option>)}
                       </select>
                       
                       {analiseImpCapa && (
-                        <div className="mb-3 bg-indigo-50 border border-indigo-100 p-2 rounded text-[11px] flex gap-6 font-bold text-indigo-900 uppercase tracking-wide">
+                        <div className="mb-3 bg-indigo-50 border border-indigo-100 p-2 rounded-lg text-[11px] flex gap-6 font-bold text-indigo-900 uppercase tracking-wide">
                           <span>Velocidade: <span className="text-indigo-700 font-mono">{analiseImpCapa.parametros.velocidade.toLocaleString('pt-BR')} giros/h</span></span>
                           <span>Tempo de Setup Unitário: <span className="text-amber-700 font-mono">{analiseImpCapa.maquinaSetupStr}</span></span>
                         </div>
@@ -2173,16 +2237,16 @@ export default function RegistrosTempo() {
 
                   {/* 1.3 Impressão Encartes */}
                   {exigeEncarte && (
-                    <div className="border border-slate-200 rounded-md p-4 bg-teal-50/10">
+                    <div className="border border-slate-200 rounded-lg p-4 bg-teal-50/10">
                       <div className="flex justify-between items-center mb-3">
                         <h4 className="text-xs font-black uppercase text-teal-900 tracking-wider">1.3 Impressão de Encartes</h4>
                       </div>
-                      <select value={idMaquinaImpressaoEncarte} onChange={(e) => setIdMaquinaImpressaoEncarte(e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm font-bold text-slate-700 bg-white mb-3">
+                      <select value={idMaquinaImpressaoEncarte} onChange={(e) => setIdMaquinaImpressaoEncarte(e.target.value)} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-700 bg-white mb-3">
                         <option value="">Selecione o equipamento do encarte...</option>
                         {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('impressão')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo} ({mq.maq_cores || mq.cores || '?'} Cores)</option>)}
                       </select>
                       {analiseImpEncarte && (
-                        <div className="mb-3 bg-teal-50 border border-teal-100 p-2 rounded text-[11px] flex gap-6 font-bold text-teal-900 uppercase tracking-wide">
+                        <div className="mb-3 bg-teal-50 border border-teal-100 p-2 rounded-lg text-[11px] flex gap-6 font-bold text-teal-900 uppercase tracking-wide">
                           <span>Velocidade: <span className="text-teal-700 font-mono">{analiseImpEncarte.parametros.velocidade.toLocaleString('pt-BR')} giros/h</span></span>
                           <span>Tempo de Setup Unitário: <span className="text-amber-700 font-mono">{analiseImpEncarte.maquinaSetupStr}</span></span>
                         </div>
@@ -2207,16 +2271,16 @@ export default function RegistrosTempo() {
 
                   {/* 1.4 Impressão Adesivos */}
                   {exigeAdesivo && (
-                    <div className="border border-slate-200 rounded-md p-4 bg-yellow-50/10">
+                    <div className="border border-slate-200 rounded-lg p-4 bg-yellow-50/10">
                       <div className="flex justify-between items-center mb-3">
                         <h4 className="text-xs font-black uppercase text-yellow-900 tracking-wider">1.4 Impressão de Adesivos</h4>
                       </div>
-                      <select value={idMaquinaImpressaoAdesivo} onChange={(e) => setIdMaquinaImpressaoAdesivo(e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm font-bold text-slate-700 bg-white mb-3">
+                      <select value={idMaquinaImpressaoAdesivo} onChange={(e) => setIdMaquinaImpressaoAdesivo(e.target.value)} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-700 bg-white mb-3">
                         <option value="">Selecione o equipamento do adesivo...</option>
                         {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('impressão')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo} ({mq.maq_cores || mq.cores || '?'} Cores)</option>)}
                       </select>
                       {analiseImpAdesivo && (
-                        <div className="mb-3 bg-yellow-50 border border-yellow-100 p-2 rounded text-[11px] flex gap-6 font-bold text-yellow-900 uppercase tracking-wide">
+                        <div className="mb-3 bg-yellow-50 border border-yellow-100 p-2 rounded-lg text-[11px] flex gap-6 font-bold text-yellow-900 uppercase tracking-wide">
                           <span>Velocidade: <span className="text-yellow-700 font-mono">{analiseImpAdesivo.parametros.velocidade.toLocaleString('pt-BR')} giros/h</span></span>
                           <span>Tempo de Setup Unitário: <span className="text-amber-700 font-mono">{analiseImpAdesivo.maquinaSetupStr}</span></span>
                         </div>
@@ -2254,7 +2318,7 @@ export default function RegistrosTempo() {
                   </button>
                   {tooltipAtivo === 'dobra' && (
                     <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[540px] bg-slate-950 text-white text-xs rounded-lg shadow-xl p-5 z-[9500] border border-slate-700 leading-relaxed animate-in zoom-in-95 duration-150 cursor-default" onClick={(e) => e.stopPropagation()}>
-                      <div className="border-b border-slate-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-amber-400 font-mono text-[11px]">Memorial de Cálculo: Dobra</h4><button onClick={() => setTooltipAtivo(null)} className="text-gray-400 hover:text-white font-bold">X</button></div>
+                      <div className="border-b border-slate-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-amber-400 font-mono text-[11px]">Memorial de Cálculo: Dobra</h4><button onClick={() => setTooltipAtivo(null)} className="text-slate-400 hover:text-white font-bold">X</button></div>
                       <div className="space-y-3 text-slate-300 font-normal normal-case">
                         <p><strong>1. Trava Plana vs Rotativa:</strong> Se a impressora alocada na Etapa 1 for do tipo <strong>Rotativa</strong>, o papel já sai dobrado! O tempo de dobra zera automaticamente. Se for <strong>Plana</strong>, as folhas retas entram na dobradeira.</p>
                         <p><strong>2. Total de Entradas:</strong> É a Qtd. de cadernos multiplicada pela Tiragem Produzida. (Ex: Um livro de 2 cadernos precisa passar {analiseDobra?.totais?.entradas?.toLocaleString('pt-BR') || 0} folhas pela máquina).</p>
@@ -2268,14 +2332,14 @@ export default function RegistrosTempo() {
               
               {secoes.dobra && (
                 <div className="p-4">
-                  <select value={idMaquinaDobra} onChange={(e) => setIdMaquinaDobra(e.target.value)} disabled={!analiseImpressao} className="w-full border border-slate-300 rounded p-2 text-sm font-bold text-slate-700 bg-white mb-3">
+                  <select value={idMaquinaDobra} onChange={(e) => setIdMaquinaDobra(e.target.value)} disabled={!analiseImpressao} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-700 bg-white mb-3">
                     <option value="">Selecione a dobradeira...</option>
                     {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('dobra')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo}</option>)}
                   </select>
                   
                   {analiseDobra && !analiseDobra.isRotativa && (
                     <>
-                      <div className="mb-3 bg-slate-50 border border-slate-200 p-2.5 rounded text-xs flex gap-6 font-bold text-slate-600 uppercase tracking-wide">
+                      <div className="mb-3 bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-xs flex gap-6 font-bold text-slate-600 uppercase tracking-wide">
                         <span>Produtividade: <span className="text-amber-700 font-mono">{analiseDobra.parametros?.velocidade?.toLocaleString('pt-BR')} fls/h</span></span>
                         <span>Tempo de Setup Unitário: <span className="text-amber-700 font-mono">{analiseDobra.maquinaSetupStr}</span></span>
                       </div>
@@ -2319,7 +2383,7 @@ export default function RegistrosTempo() {
                     </button>
                     {tooltipAtivo === 'benCapa' && (
                       <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[540px] bg-slate-950 text-white text-xs rounded-lg shadow-xl p-5 z-[9500] border border-sky-700 leading-relaxed animate-in zoom-in-95 duration-150 cursor-default" onClick={(e) => e.stopPropagation()}>
-                        <div className="border-b border-sky-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-sky-400 font-mono text-[11px]">Memorial de Cálculo: Beneficiamento</h4><button onClick={() => setTooltipAtivo(null)} className="text-gray-400 hover:text-white font-bold">X</button></div>
+                        <div className="border-b border-sky-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-sky-400 font-mono text-[11px]">Memorial de Cálculo: Beneficiamento</h4><button onClick={() => setTooltipAtivo(null)} className="text-slate-400 hover:text-white font-bold">X</button></div>
                         <div className="space-y-3 text-slate-300 font-normal normal-case">
                           <p>O sistema identificou que a Capa possui Laminação ou Verniz cadastrado no banco. O cálculo de rodagem puxa <strong>exclusivamente as folhas físicas da capa externa</strong> (excluindo, por exemplo, Guardas de capa dura, que não levam acabamento externo).</p>
                         </div>
@@ -2331,14 +2395,14 @@ export default function RegistrosTempo() {
 
                 {secoes.benefCapa && (
                   <div className="p-4">
-                    <select value={idMaquinaBeneficiamentoCapa} onChange={(e) => setIdMaquinaBeneficiamentoCapa(e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm font-bold text-slate-700 bg-white mb-3">
+                    <select value={idMaquinaBeneficiamentoCapa} onChange={(e) => setIdMaquinaBeneficiamentoCapa(e.target.value)} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-700 bg-white mb-3">
                       <option value="">Selecione a laminadora/envernizadora...</option>
                       {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('beneficiamento')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo}</option>)}
                     </select>
                     
                     {analiseBenCapa && (
                       <>
-                        <div className="bg-sky-50 border border-sky-100 p-2.5 rounded text-xs flex gap-6 font-bold text-sky-900 uppercase tracking-wide">
+                        <div className="bg-sky-50 border border-sky-100 p-2.5 rounded-lg text-xs flex gap-6 font-bold text-sky-900 uppercase tracking-wide">
                           <span>Produtividade: <span className="text-sky-700 font-mono">{analiseBenCapa.parametros.velocidade.toLocaleString('pt-BR')} fls/h</span></span>
                           <span>Tempo de Setup Unitário: <span className="text-amber-700 font-mono">{analiseBenCapa.maquinaSetupStr}</span></span>
                         </div>
@@ -2393,7 +2457,7 @@ export default function RegistrosTempo() {
                     {/* TOOLTIP CENTRALIZADO PADRÃO */}
                     {tooltipAtivo === 'empCapa' && (
                       <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[540px] bg-slate-950 text-white text-xs rounded-lg shadow-xl p-5 z-[9500] border border-orange-700 leading-relaxed animate-in zoom-in-95 duration-150 cursor-default" onClick={(e) => e.stopPropagation()}>
-                        <div className="border-b border-orange-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-orange-400 font-mono text-[11px]">Memorial de Cálculo: Empastamento</h4><button onClick={() => setTooltipAtivo(null)} className="text-gray-400 hover:text-white font-bold">X</button></div>
+                        <div className="border-b border-orange-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-orange-400 font-mono text-[11px]">Memorial de Cálculo: Empastamento</h4><button onClick={() => setTooltipAtivo(null)} className="text-slate-400 hover:text-white font-bold">X</button></div>
                         <div className="space-y-3 text-slate-300 font-normal normal-case">
                           <p>O sistema identificou uma Capa do tipo **DURA**. Esse setor calcula o tempo necessário para colar a capa impressa na chapa de papelão Paraná.</p>
                           <p>A matemática calcula <strong>capa a capa</strong>, baseando-se na tiragem com quebra necessária para montagem.</p>
@@ -2406,14 +2470,14 @@ export default function RegistrosTempo() {
 
                 {secoes.empastCapa && (
                   <div className="p-4">
-                    <select value={idMaquinaEmpastamentoCapa} onChange={(e) => setIdMaquinaEmpastamentoCapa(e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm font-bold text-slate-700 bg-white mb-3">
+                    <select value={idMaquinaEmpastamentoCapa} onChange={(e) => setIdMaquinaEmpastamentoCapa(e.target.value)} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-700 bg-white mb-3">
                       <option value="">Selecione a Empastadeira...</option>
                       {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('empastamento')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo}</option>)}
                     </select>
                     
                     {analiseEmpCapa && (
                       <>
-                        <div className="bg-orange-50 border border-orange-100 p-2.5 rounded text-xs flex gap-6 font-bold text-orange-900 uppercase tracking-wide">
+                        <div className="bg-orange-50 border border-orange-100 p-2.5 rounded-lg text-xs flex gap-6 font-bold text-orange-900 uppercase tracking-wide">
                           <span>Produtividade: <span className="text-orange-700 font-mono">{analiseEmpCapa.parametros.velocidade.toLocaleString('pt-BR')} capas/h</span></span>
                           <span>Tempo de Setup Unitário: <span className="text-amber-700 font-mono">{analiseEmpCapa.maquinaSetupStr}</span></span>
                         </div>
@@ -2468,7 +2532,7 @@ export default function RegistrosTempo() {
                     {/* TOOLTIP CENTRALIZADO PADRÃO */}
                     {tooltipAtivo === 'alceamento' && (
                       <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[540px] bg-slate-950 text-white text-xs rounded-lg shadow-xl p-5 z-[9500] border border-slate-700 leading-relaxed animate-in zoom-in-95 duration-150 cursor-default" onClick={(e) => e.stopPropagation()}>
-                        <div className="border-b border-slate-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-amber-400 font-mono text-[11px]">Memorial de Cálculo: Alceadeira</h4><button onClick={() => setTooltipAtivo(null)} className="text-gray-400 hover:text-white font-bold">X</button></div>
+                        <div className="border-b border-slate-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-amber-400 font-mono text-[11px]">Memorial de Cálculo: Alceadeira</h4><button onClick={() => setTooltipAtivo(null)} className="text-slate-400 hover:text-white font-bold">X</button></div>
                         <div className="space-y-3 text-slate-300 font-normal normal-case">
                           <p><strong>1. A Lógica de Gavetas vs Tombos:</strong> A alceadeira escolhida possui <strong>{analiseAlceamento?.parametros.gavetas} gavetas</strong>. Se o livro gerou mais cadernos do que a máquina tem de gavetas, o lote precisará de mais de uma passada (tombos) para formar o bloco: <strong>{analiseAlceamento?.parametros.entradas} entrada(s)</strong> estimadas.</p>
                           <p><strong>2. Cronoanálise:</strong> O Setup unitário ({analiseAlceamento?.parametros.setupUnitario}) é multiplicado pelas entradas necessárias. A rodagem divide a tiragem produzida com perdas multiplicada pelo número de entradas, pela velocidade da esteira.</p>
@@ -2481,14 +2545,14 @@ export default function RegistrosTempo() {
                 
                 {secoes.alceamento && (
                   <div className="p-4">
-                    <select value={idMaquinaAlceadeira} onChange={(e) => setIdMaquinaAlceadeira(e.target.value)} disabled={!analiseImpressao} className="w-full border border-slate-300 rounded p-2 text-sm font-bold text-slate-700 bg-white mb-3">
+                    <select value={idMaquinaAlceadeira} onChange={(e) => setIdMaquinaAlceadeira(e.target.value)} disabled={!analiseImpressao} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-700 bg-white mb-3">
                       <option value="">Selecione a alceadeira/coladeira...</option>
                       {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('alceadeira') || String(m.tipo || '').toLowerCase().includes('pur') || String(m.tipo || '').toLowerCase().includes('cola')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo}</option>)}
                     </select>
                     
                     {analiseAlceamento && (
                       <>
-                        <div className="bg-slate-50 border border-slate-200 p-2.5 rounded text-xs flex gap-6 font-bold text-slate-600 uppercase tracking-wide">
+                        <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-xs flex gap-6 font-bold text-slate-600 uppercase tracking-wide">
                           <span>Produtividade: <span className="text-purple-700 font-mono">{analiseAlceamento.parametros.velocidade.toLocaleString('pt-BR')} un/h</span></span>
                           <span>Tempo de Setup Unitário: <span className="text-amber-700 font-mono">{analiseAlceamento.maquinaSetupStr}</span></span>
                           <span>Volume de Livros: <span className="text-slate-900 font-mono">{analiseAlceamento.parametros.livrosAlceados.toLocaleString('pt-BR')} un.</span></span>
@@ -2534,7 +2598,7 @@ export default function RegistrosTempo() {
                     {/* TOOLTIP CENTRALIZADO PADRÃO */}
                     {tooltipAtivo === 'grampo' && (
                       <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[540px] bg-slate-950 text-white text-xs rounded-lg shadow-xl p-5 z-[9500] border border-slate-700 leading-relaxed animate-in zoom-in-95 duration-150 cursor-default" onClick={(e) => e.stopPropagation()}>
-                        <div className="border-b border-slate-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-amber-400 font-mono text-[11px]">Memorial de Cálculo: Grampo</h4><button onClick={() => setTooltipAtivo(null)} className="text-gray-400 hover:text-white font-bold">X</button></div>
+                        <div className="border-b border-slate-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-amber-400 font-mono text-[11px]">Memorial de Cálculo: Grampo</h4><button onClick={() => setTooltipAtivo(null)} className="text-slate-400 hover:text-white font-bold">X</button></div>
                         <div className="space-y-3 text-slate-300 font-normal normal-case">
                           <p><strong>1. Quando se aplica a Canoa?</strong> Este setor é ativado porque o acabamento do material exige grampos em revistas (Canoa).</p>
                           <p><strong>2. Divisão de Gavetas:</strong> A grampeadeira possui <strong>{analiseGrampo?.parametros.gavetas} gavetas</strong>. A quantidade de cadernos totais gerada é cruzada com a capacidade, resultando em <strong>{analiseGrampo?.parametros.entradas} tombos de máquina</strong>.</p>
@@ -2547,14 +2611,14 @@ export default function RegistrosTempo() {
 
                 {secoes.grampo && (
                   <div className="p-4">
-                    <select value={idMaquinaGrampo} onChange={(e) => setIdMaquinaGrampo(e.target.value)} disabled={!analiseImpressao} className="w-full border border-slate-300 rounded p-2 text-sm font-bold text-slate-700 bg-white mb-3">
+                    <select value={idMaquinaGrampo} onChange={(e) => setIdMaquinaGrampo(e.target.value)} disabled={!analiseImpressao} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-700 bg-white mb-3">
                       <option value="">Selecione a grampeadeira...</option>
                       {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('grampo') || String(m.tipo || '').toLowerCase().includes('canoa')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo}</option>)}
                     </select>
                     
                     {analiseGrampo && (
                       <>
-                        <div className="bg-slate-50 border border-slate-200 p-2.5 rounded text-xs flex gap-6 font-bold text-slate-600 uppercase tracking-wide">
+                        <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-xs flex gap-6 font-bold text-slate-600 uppercase tracking-wide">
                           <span>Produtividade: <span className="text-emerald-700 font-mono">{analiseGrampo.parametros.velocidade.toLocaleString('pt-BR')} un/h</span></span>
                           <span>Tempo de Setup Unitário: <span className="text-amber-700 font-mono">{analiseGrampo.maquinaSetupStr}</span></span>
                           <span>Volume de Livros: <span className="text-slate-900 font-mono">{analiseGrampo.parametros.livrosGrampeados.toLocaleString('pt-BR')} un.</span></span>
@@ -2600,7 +2664,7 @@ export default function RegistrosTempo() {
                     {/* TOOLTIP CENTRALIZADO PADRÃO */}
                     {tooltipAtivo === 'espiral' && (
                       <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[540px] bg-slate-950 text-white text-xs rounded-lg shadow-xl p-5 z-[9500] border border-slate-700 leading-relaxed animate-in zoom-in-95 duration-150 cursor-default" onClick={(e) => e.stopPropagation()}>
-                        <div className="border-b border-slate-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-amber-400 font-mono text-[11px]">Memorial de Cálculo: Espiral</h4><button onClick={() => setTooltipAtivo(null)} className="text-gray-400 hover:text-white font-bold">X</button></div>
+                        <div className="border-b border-slate-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-amber-400 font-mono text-[11px]">Memorial de Cálculo: Espiral</h4><button onClick={() => setTooltipAtivo(null)} className="text-slate-400 hover:text-white font-bold">X</button></div>
                         <div className="space-y-3 text-slate-300 font-normal normal-case">
                           <p><strong>1. Furação Manual/Semi:</strong> Se a máquina de furo selecionada exigir operação manual, calcula-se multiplicando o Total de Páginas pela Tiragem com Quebras, para encontrar a carga total de batidas.</p>
                           <p><strong>2. Espiralação Automática:</strong> O cálculo de velocidade divide os ciclos da garra pela quantidade de mordidas necessárias com base na espessura da <strong>Lombada ({osAtual.lombada}mm)</strong> e cruzado com a Trava Mecânica da máquina.</p>
@@ -2612,17 +2676,17 @@ export default function RegistrosTempo() {
                 </div>
 
                 {secoes.espiral && (
-                  <div className="p-4 grid grid-cols-2 gap-6">
+                  <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <label className="block text-xs font-bold text-slate-600 uppercase mb-2">Máquina Furação (Opcional)</label>
-                      <select value={idMaquinaFuracao} onChange={(e) => setIdMaquinaFuracao(e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm font-bold text-slate-700 bg-white">
+                      <select value={idMaquinaFuracao} onChange={(e) => setIdMaquinaFuracao(e.target.value)} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-700 bg-white">
                         <option value="">Selecione a furação...</option>
                         {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('espiral') || String(m.tipo || '').toLowerCase().includes('fura')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo}</option>)}
                       </select>
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-600 uppercase mb-2">Máquina Espiral/Wire-o</label>
-                      <select value={idMaquinaEspiral} onChange={(e) => setIdMaquinaEspiral(e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm font-bold text-slate-700 bg-white">
+                      <select value={idMaquinaEspiral} onChange={(e) => setIdMaquinaEspiral(e.target.value)} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-700 bg-white">
                         <option value="">Selecione a espiralação...</option>
                         {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('espiral') || String(m.tipo || '').toLowerCase().includes('wire')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo} (Até {mq.limite_lombada || 0}mm)</option>)}
                       </select>
@@ -2630,7 +2694,7 @@ export default function RegistrosTempo() {
 
                     {analiseEspiral && (
                       <div className="col-span-2 mt-2">
-                        <div className="bg-slate-50 border border-slate-200 p-2.5 rounded text-xs flex gap-6 font-bold text-slate-600 uppercase tracking-wide mb-4">
+                        <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-xs flex gap-6 font-bold text-slate-600 uppercase tracking-wide mb-4">
                           <span>
                             Veloc. Espiral Estimada: <span className={`font-mono ${analiseEspiral.parametros.hitLimit ? 'text-rose-600' : 'text-emerald-700'}`}>{analiseEspiral.parametros.velEspiral.toLocaleString('pt-BR')} un/h</span>
                             {analiseEspiral.parametros.hitLimit && <span className="text-[9px] text-rose-500 ml-1">(Travado no Limite)</span>}
@@ -2685,7 +2749,7 @@ export default function RegistrosTempo() {
                     {/* TOOLTIP CENTRALIZADO PADRÃO */}
                     {tooltipAtivo === 'corteVinco' && (
                       <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[540px] bg-slate-950 text-white text-xs rounded-lg shadow-xl p-5 z-[9500] border border-red-700 leading-relaxed animate-in zoom-in-95 duration-150 cursor-default" onClick={(e) => e.stopPropagation()}>
-                        <div className="border-b border-red-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-red-400 font-mono text-[11px]">Memorial de Cálculo: Corte e Vinco</h4><button onClick={() => setTooltipAtivo(null)} className="text-gray-400 hover:text-white font-bold">X</button></div>
+                        <div className="border-b border-red-700 pb-2 mb-3 flex justify-between items-center"><h4 className="font-bold uppercase tracking-wider text-red-400 font-mono text-[11px]">Memorial de Cálculo: Corte e Vinco</h4><button onClick={() => setTooltipAtivo(null)} className="text-slate-400 hover:text-white font-bold">X</button></div>
                         <div className="space-y-3 text-slate-300 font-normal normal-case">
                           <p>O sistema identificou a flag "Sim" na coluna de Corte e Vinco dos Encartes/Adesivos. Ele recuperou exatamente o volume de folhas gerado na impressão dessas peças para processar o corte na velocidade parametrizada.</p>
                         </div>
@@ -2697,14 +2761,14 @@ export default function RegistrosTempo() {
 
                 {secoes.corteVinco && (
                   <div className="p-4">
-                    <select value={idMaquinaCorteVinco} onChange={(e) => setIdMaquinaCorteVinco(e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm font-bold text-slate-700 bg-white mb-3">
+                    <select value={idMaquinaCorteVinco} onChange={(e) => setIdMaquinaCorteVinco(e.target.value)} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-700 bg-white mb-3">
                       <option value="">Selecione o equipamento de corte e vinco...</option>
                       {maquinasCargadas.filter(m => String(m.tipo || '').toLowerCase().includes('corte')).map(mq => <option key={mq.id} value={mq.id}>{mq.modelo}</option>)}
                     </select>
                     
                     {analiseCorteVinco && (
                       <>
-                        <div className="bg-red-50 border border-red-100 p-2.5 rounded text-xs flex gap-6 font-bold text-red-900 uppercase tracking-wide">
+                        <div className="bg-red-50 border border-red-100 p-2.5 rounded-lg text-xs flex gap-6 font-bold text-red-900 uppercase tracking-wide">
                           <span>Produtividade: <span className="text-red-700 font-mono">{analiseCorteVinco.parametros.velocidade.toLocaleString('pt-BR')} fls/h</span></span>
                           <span>Tempo de Setup Unitário: <span className="text-amber-700 font-mono">{analiseCorteVinco.maquinaSetupStr}</span></span>
                         </div>
@@ -2744,7 +2808,7 @@ export default function RegistrosTempo() {
 
             {/* BOTÃO GRAVAR (ATUALIZADO) */}
             <div className="flex justify-end mt-6">
-              <button onClick={() => salvarOSNoBanco(analiseImpressao, analiseImpCapa, analiseBenCapa, analiseEmpCapa, analiseImpEncarte, analiseImpAdesivo, analiseCorteVinco, analiseDobra, analiseAlceamento, analiseGrampo, analiseEspiral)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-3 rounded-md shadow-md flex items-center gap-2 text-sm uppercase tracking-wide"><i className="fas fa-save"></i> Gravar Engenharia da O.S.</button>
+              <button onClick={() => salvarOSNoBanco(analiseImpressao, analiseImpCapa, analiseBenCapa, analiseEmpCapa, analiseImpEncarte, analiseImpAdesivo, analiseCorteVinco, analiseDobra, analiseAlceamento, analiseGrampo, analiseEspiral)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-3 rounded-lg shadow-sm shadow-blue-600/20 transition-all flex items-center gap-2 text-sm uppercase tracking-wide"><i className="fas fa-save"></i> Gravar Engenharia da O.S.</button>
             </div>
 
           </div>
