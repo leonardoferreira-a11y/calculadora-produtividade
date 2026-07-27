@@ -211,18 +211,18 @@ export default function ParqueMaquinas() {
         </div>
       )}
 
-      <header className="flex justify-between items-end mb-6 border-b-2 border-slate-200 pb-4">
+      <header className="flex flex-col md:flex-row md:justify-between md:items-end gap-4 mb-6 border-b border-slate-200 pb-4">
         <div>
-          <h1 className="text-2xl font-black text-slate-800 uppercase">Parque de Máquinas</h1>
-          <p className="text-gray-600 font-medium mt-1">
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">Parque de Máquinas</h1>
+          <p className="text-sm text-slate-500 font-medium mt-1">
             {nivelLogado === 'USER_GRAFICA' ? 'Visualização dos equipamentos da sua unidade.' : 'Cadastro unificado de equipamentos e parâmetros operacionais.'}
           </p>
         </div>
-        
+
         {podeEditar && (
-          <button 
-            onClick={() => { setEditandoId(null); setFormData(formInicial); setErroForm(''); setModalAberto(true); }} 
-            className="bg-blue-600 text-white px-6 py-2.5 rounded hover:bg-blue-700 transition-colors font-bold shadow-sm flex items-center gap-2"
+          <button
+            onClick={() => { setEditandoId(null); setFormData(formInicial); setErroForm(''); setModalAberto(true); }}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-5 rounded-lg shadow-sm shadow-blue-600/20 transition-all text-sm flex items-center gap-2 w-max"
           >
             <i className="fas fa-plus"></i> Nova Máquina
           </button>
@@ -240,8 +240,8 @@ export default function ParqueMaquinas() {
             <div className="relative">
               <button 
                 onClick={() => setDropdownAberto(dropdownAberto === 'graficas' ? null : 'graficas')}
-                className={`border px-4 py-2 rounded text-sm font-bold shadow-sm flex items-center justify-between min-w-[200px] transition-colors
-                  ${dropdownAberto === 'graficas' ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-gray-300 text-slate-700 hover:bg-slate-50'}`}
+                className={`border px-4 py-2.5 rounded-lg text-sm font-bold shadow-sm flex items-center justify-between min-w-[200px] transition-all
+                  ${dropdownAberto === 'graficas' ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'}`}
               >
                 <span>
                   Gráficas {filtros.graficas.length > 0 && <span className="ml-1 bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded text-xs">{filtros.graficas.length}</span>}
@@ -250,10 +250,10 @@ export default function ParqueMaquinas() {
               </button>
               
               {dropdownAberto === 'graficas' && (
-                <div className="absolute top-full left-0 mt-2 w-full min-w-[240px] bg-white border border-gray-200 shadow-xl rounded-lg py-2 max-h-60 overflow-y-auto">
+                <div className="absolute top-full left-0 mt-2 w-full min-w-[240px] bg-white border border-slate-200 shadow-xl rounded-lg py-2 max-h-60 overflow-y-auto">
                   {opcoesGraficas.map(g => (
                     <label key={g} className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 cursor-pointer">
-                      <input type="checkbox" checked={filtros.graficas.includes(g)} onChange={() => toggleFiltro('graficas', g)} className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500" />
+                      <input type="checkbox" checked={filtros.graficas.includes(g)} onChange={() => toggleFiltro('graficas', g)} className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500" />
                       <span className="text-sm font-medium text-slate-700 uppercase">{g}</span>
                     </label>
                   ))}
@@ -266,8 +266,8 @@ export default function ParqueMaquinas() {
             <div className="relative">
               <button 
                 onClick={() => setDropdownAberto(dropdownAberto === 'processos' ? null : 'processos')}
-                className={`border px-4 py-2 rounded text-sm font-bold shadow-sm flex items-center justify-between min-w-[200px] transition-colors
-                  ${dropdownAberto === 'processos' ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-gray-300 text-slate-700 hover:bg-slate-50'}`}
+                className={`border px-4 py-2.5 rounded-lg text-sm font-bold shadow-sm flex items-center justify-between min-w-[200px] transition-all
+                  ${dropdownAberto === 'processos' ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'}`}
               >
                 <span>
                   Processos {filtros.processos.length > 0 && <span className="ml-1 bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded text-xs">{filtros.processos.length}</span>}
@@ -276,10 +276,10 @@ export default function ParqueMaquinas() {
               </button>
               
               {dropdownAberto === 'processos' && (
-                <div className="absolute top-full left-0 mt-2 w-full min-w-[240px] bg-white border border-gray-200 shadow-xl rounded-lg py-2 max-h-60 overflow-y-auto">
+                <div className="absolute top-full left-0 mt-2 w-full min-w-[240px] bg-white border border-slate-200 shadow-xl rounded-lg py-2 max-h-60 overflow-y-auto">
                   {opcoesProcessos.map(p => (
                     <label key={p} className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 cursor-pointer">
-                      <input type="checkbox" checked={filtros.processos.includes(p)} onChange={() => toggleFiltro('processos', p)} className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500" />
+                      <input type="checkbox" checked={filtros.processos.includes(p)} onChange={() => toggleFiltro('processos', p)} className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500" />
                       <span className="text-sm font-medium text-slate-700">{p}</span>
                     </label>
                   ))}
@@ -292,8 +292,8 @@ export default function ParqueMaquinas() {
             <div className="relative">
               <button 
                 onClick={() => setDropdownAberto(dropdownAberto === 'tecnologias' ? null : 'tecnologias')}
-                className={`border px-4 py-2 rounded text-sm font-bold shadow-sm flex items-center justify-between min-w-[200px] transition-colors
-                  ${dropdownAberto === 'tecnologias' ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-gray-300 text-slate-700 hover:bg-slate-50'}`}
+                className={`border px-4 py-2.5 rounded-lg text-sm font-bold shadow-sm flex items-center justify-between min-w-[200px] transition-all
+                  ${dropdownAberto === 'tecnologias' ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'}`}
               >
                 <span>
                   Tecnologias {filtros.tecnologias.length > 0 && <span className="ml-1 bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded text-xs">{filtros.tecnologias.length}</span>}
@@ -302,10 +302,10 @@ export default function ParqueMaquinas() {
               </button>
               
               {dropdownAberto === 'tecnologias' && (
-                <div className="absolute top-full left-0 mt-2 w-full min-w-[240px] bg-white border border-gray-200 shadow-xl rounded-lg py-2 max-h-60 overflow-y-auto">
+                <div className="absolute top-full left-0 mt-2 w-full min-w-[240px] bg-white border border-slate-200 shadow-xl rounded-lg py-2 max-h-60 overflow-y-auto">
                   {opcoesTecnologias.map(t => (
                     <label key={t} className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 cursor-pointer">
-                      <input type="checkbox" checked={filtros.tecnologias.includes(t)} onChange={() => toggleFiltro('tecnologias', t)} className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500" />
+                      <input type="checkbox" checked={filtros.tecnologias.includes(t)} onChange={() => toggleFiltro('tecnologias', t)} className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500" />
                       <span className="text-sm font-medium text-slate-700">{t}</span>
                     </label>
                   ))}
@@ -326,9 +326,9 @@ export default function ParqueMaquinas() {
       )}
 
       {/* TABELA DE MÁQUINAS */}
-      <div className="bg-white border border-gray-300 rounded-lg shadow-sm overflow-x-auto w-full relative z-10">
-        <table className="w-full text-left border-collapse min-w-[1300px]">
-          <thead className="bg-slate-100 border-b border-gray-300 text-xs uppercase text-slate-700 font-bold whitespace-nowrap">
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-x-auto w-full relative z-10">
+        <table className="w-full text-left border-collapse text-sm min-w-[1300px]">
+          <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold tracking-wider whitespace-nowrap">
             <tr>
               <th className="p-3">Gráfica</th>
               <th className="p-3">Processo</th>
@@ -348,10 +348,10 @@ export default function ParqueMaquinas() {
               {podeEditar && <th className="p-3 text-center">Ações</th>}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200 text-sm text-slate-700">
+          <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
             {maquinasFiltradas.length === 0 ? (
               <tr>
-                <td colSpan={podeEditar ? 16 : 15} className="p-6 text-center text-gray-500 font-medium">
+                <td colSpan={podeEditar ? 16 : 15} className="p-6 text-center text-slate-500 font-medium">
                   {maquinas.length === 0 ? 'Nenhum equipamento cadastrado no parque.' : 'Nenhuma máquina encontrada para os filtros selecionados.'}
                 </td>
               </tr>
@@ -369,7 +369,7 @@ export default function ParqueMaquinas() {
                 }
 
                 return (
-                  <tr key={m.id} className="hover:bg-slate-50 transition-colors whitespace-nowrap">
+                  <tr key={m.id} className="hover:bg-slate-50/50 transition-colors whitespace-nowrap">
                     <td className="p-3 font-medium uppercase">{m.grafica}</td>
                     <td className="p-3">{m.tipo}</td>
                     <td className="p-3">{m.tecnologia || '-'}</td>
@@ -387,39 +387,42 @@ export default function ParqueMaquinas() {
                     <td className="p-3 text-slate-500 text-xs">{textoExtras}</td>
                     
                     {podeEditar && (
-                      <td className="p-3 text-center flex items-center justify-center gap-1">
-                        <button 
-                          onClick={() => { 
-                            setEditandoId(m.id);
-                            setFormData({
-                              ...formInicial,
-                              ...m,
-                              tecnologia: m.tecnologia || 'Offset',
-                              ...conf
-                            }); 
-                            setErroForm(''); 
-                            setModalAberto(true); 
-                          }} 
-                          className="text-blue-600 hover:text-blue-800 font-bold uppercase text-[11px] border border-blue-200 hover:bg-blue-50 px-3 py-1.5 rounded transition-colors"
-                        >
-                          Editar
-                        </button>
+                      <td className="p-3">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => {
+                              setEditandoId(m.id);
+                              setFormData({
+                                ...formInicial,
+                                ...m,
+                                tecnologia: m.tecnologia || 'Offset',
+                                ...conf
+                              });
+                              setErroForm('');
+                              setModalAberto(true);
+                            }}
+                            className="text-slate-400 hover:text-blue-600 transition-colors p-2"
+                            title="Editar Máquina"
+                          >
+                            <i className="fas fa-pen"></i>
+                          </button>
 
-                        {/* 🔴 BOTÃO DUPLICAR CORRIGIDO DA LINHA (LENDO A VARIÁVEL M DO MAP) */}
-                        <button
-                          onClick={() => duplicarMaquina(m)}
-                          className="text-slate-400 hover:text-blue-600 transition-colors px-2 text-base"
-                          title="Duplicar Especificações"
-                        >
-                          <i className="fas fa-copy"></i>
-                        </button>
-                        <button
-                          onClick={() => excluirMaquina(m.id, m.modelo)}
-                          className="text-slate-400 hover:text-red-600 transition-colors px-2 text-base"
-                          title="Excluir Máquina"
-                        >
-                          <i className="fas fa-trash-alt"></i>
-                        </button>
+                          {/* 🔴 BOTÃO DUPLICAR CORRIGIDO DA LINHA (LENDO A VARIÁVEL M DO MAP) */}
+                          <button
+                            onClick={() => duplicarMaquina(m)}
+                            className="text-slate-400 hover:text-blue-600 transition-colors p-2"
+                            title="Duplicar Especificações"
+                          >
+                            <i className="fas fa-copy"></i>
+                          </button>
+                          <button
+                            onClick={() => excluirMaquina(m.id, m.modelo)}
+                            className="text-slate-400 hover:text-red-600 transition-colors p-2"
+                            title="Excluir Máquina"
+                          >
+                            <i className="fas fa-trash-alt"></i>
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -431,13 +434,13 @@ export default function ParqueMaquinas() {
       </div>
 
       {confirmacaoExcluir && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[9999]">
-          <div className="bg-white rounded-xl shadow-2xl border w-full max-w-sm p-6">
-            <h3 className="text-lg font-bold text-slate-800 mb-2">Confirmar Exclusão</h3>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[9999] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-sm p-6">
+            <h3 className="text-lg font-bold text-slate-900 mb-2">Confirmar Exclusão</h3>
             <p className="text-sm text-slate-600 mb-6">Tem certeza que deseja excluir a máquina <strong>"{confirmacaoExcluir.modelo}"</strong>? Esta ação não pode ser desfeita.</p>
             <div className="flex justify-end gap-3">
-              <button onClick={() => setConfirmacaoExcluir(null)} className="px-4 py-2 text-sm font-bold text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-100">Cancelar</button>
-              <button onClick={confirmarExclusao} className="px-4 py-2 text-sm font-bold bg-red-600 text-white rounded-lg hover:bg-red-700">Excluir</button>
+              <button onClick={() => setConfirmacaoExcluir(null)} className="bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300 font-bold py-2.5 px-5 rounded-lg shadow-sm transition-all text-sm">Cancelar</button>
+              <button onClick={confirmarExclusao} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-5 rounded-lg shadow-sm shadow-red-600/20 transition-all text-sm">Excluir</button>
             </div>
           </div>
         </div>
@@ -445,14 +448,14 @@ export default function ParqueMaquinas() {
 
       {/* MODAL DE CADASTRO/EDIÇÃO */}
       {modalAberto && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="bg-slate-900 p-4 text-white flex justify-between items-center shrink-0">
               <h2 className="text-lg font-bold uppercase tracking-wider">{editandoId ? 'Editar Equipamento' : 'Cadastrar Equipamento'}</h2>
-              <button onClick={() => setModalAberto(false)} className="text-gray-400 hover:text-white"><i className="fas fa-times text-xl"></i></button>
+              <button onClick={() => setModalAberto(false)} className="text-slate-400 hover:text-white"><i className="fas fa-times text-xl"></i></button>
             </div>
             
-            <form onSubmit={salvar} className="p-6 grid grid-cols-3 gap-4 overflow-y-auto" autoComplete="off">
+            <form onSubmit={salvar} className="p-6 grid grid-cols-1 md:grid-cols-3 gap-4 overflow-y-auto" autoComplete="off">
               {erroForm && (
                 <div className="col-span-3 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded text-sm font-bold flex items-center gap-2 mb-2">
                   <i className="fas fa-exclamation-circle text-red-500"></i>
@@ -461,13 +464,13 @@ export default function ParqueMaquinas() {
               )}
 
               <div className="col-span-3 md:col-span-1">
-                <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Gráfica / Empresa <span className="text-red-500">*</span></label>
-                <input type="text" required value={formData.grafica || ''} onChange={e => setFormData({...formData, grafica: e.target.value.toUpperCase()})} placeholder="Ex: WALPRINT" className="w-full border border-gray-300 rounded p-2 text-sm uppercase" />
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Gráfica / Empresa <span className="text-red-500">*</span></label>
+                <input type="text" required value={formData.grafica || ''} onChange={e => setFormData({...formData, grafica: e.target.value.toUpperCase()})} placeholder="Ex: WALPRINT" className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-medium text-slate-800 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all uppercase" />
               </div>
 
               <div className="col-span-3 md:col-span-1">
-                <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Tipo de Processo</label>
-                <select value={formData.tipo || ''} onChange={e => setFormData({...formData, tipo: e.target.value})} className="w-full border border-gray-300 rounded p-2 text-sm font-bold">
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Tipo de Processo</label>
+                <select value={formData.tipo || ''} onChange={e => setFormData({...formData, tipo: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-medium text-slate-800 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-bold">
                   <option value="Impressão">Impressão (Miolo/Capa/Enc)</option>
                   <option value="Dobra">Dobra</option>
                   <option value="Alceadeira">Alceadeira</option>
@@ -483,8 +486,8 @@ export default function ParqueMaquinas() {
               </div>
 
               <div className="col-span-3 md:col-span-1">
-                <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Tecnologia</label>
-                <select value={formData.tecnologia || ''} onChange={e => setFormData({...formData, tecnologia: e.target.value})} className="w-full border border-gray-300 rounded p-2 text-sm font-bold text-slate-700">
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Tecnologia</label>
+                <select value={formData.tecnologia || ''} onChange={e => setFormData({...formData, tecnologia: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-medium text-slate-800 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-bold text-slate-700">
                   <option value="Offset">Offset (Plana/Rotativa)</option>
                   <option value="Digital">Digital (Laser/Jato Tinta)</option>
                   <option value="Automática">Automática</option>
@@ -494,121 +497,121 @@ export default function ParqueMaquinas() {
               </div>
 
               <div className="col-span-3">
-                <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Modelo / Nome Máquina <span className="text-red-500">*</span></label>
-                <input type="text" required value={formData.modelo || ''} onChange={e => setFormData({...formData, modelo: e.target.value})} placeholder="Ex: Speedmaster XL 75" className="w-full border border-gray-300 rounded p-2 text-sm" />
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Modelo / Nome Máquina <span className="text-red-500">*</span></label>
+                <input type="text" required value={formData.modelo || ''} onChange={e => setFormData({...formData, modelo: e.target.value})} placeholder="Ex: Speedmaster XL 75" className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-medium text-slate-800 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
               </div>
 
               <div className="col-span-1">
-                <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Qtd Cores Máq</label>
-                <input type="number" min="0" value={formData.maq_cores} onChange={e => setFormData({...formData, maq_cores: Number(e.target.value)})} className="w-full border border-gray-300 rounded p-2 text-sm" />
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Qtd Cores Máq</label>
+                <input type="number" min="0" value={formData.maq_cores} onChange={e => setFormData({...formData, maq_cores: Number(e.target.value)})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-medium text-slate-800 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
               </div>
 
               <div className="col-span-1">
-                <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Qtd de Máquinas</label>
-                <input type="number" min="1" value={formData.maquinas} onChange={e => setFormData({...formData, maquinas: Number(e.target.value)})} className="w-full border border-gray-300 rounded p-2 text-sm font-bold" />
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Qtd de Máquinas</label>
+                <input type="number" min="1" value={formData.maquinas} onChange={e => setFormData({...formData, maquinas: Number(e.target.value)})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-medium text-slate-800 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-bold" />
               </div>
 
               <div className="col-span-1">
-                <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Operadores (Pessoas)</label>
-                <input type="number" min="1" value={formData.pessoas} onChange={e => setFormData({...formData, pessoas: Number(e.target.value)})} className="w-full border border-gray-300 rounded p-2 text-sm" />
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Operadores (Pessoas)</label>
+                <input type="number" min="1" value={formData.pessoas} onChange={e => setFormData({...formData, pessoas: Number(e.target.value)})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-medium text-slate-800 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
               </div>
 
               <div className="col-span-3 md:col-span-1">
-                <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Produtividade Unitária</label>
-                <input type="number" min="0" value={formData.produtividade_unit} onChange={e => setFormData({...formData, produtividade_unit: Number(e.target.value)})} className="w-full border border-gray-300 rounded p-2 text-sm font-bold" />
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Produtividade Unitária</label>
+                <input type="number" min="0" value={formData.produtividade_unit} onChange={e => setFormData({...formData, produtividade_unit: Number(e.target.value)})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-medium text-slate-800 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-bold" />
               </div>
 
               <div className="col-span-3 md:col-span-1">
-                <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Métrica de Velocidade</label>
-                <input type="text" value={formData.metrica || ''} onChange={e => setFormData({...formData, metrica: e.target.value})} placeholder="Ex: Giros/Hora, Folhas/Hora" className="w-full border border-gray-300 rounded p-2 text-sm text-slate-700 font-bold" />
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Métrica de Velocidade</label>
+                <input type="text" value={formData.metrica || ''} onChange={e => setFormData({...formData, metrica: e.target.value})} placeholder="Ex: Giros/Hora, Folhas/Hora" className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-medium text-slate-800 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-slate-700 font-bold" />
               </div>
 
               <div className="col-span-3 md:col-span-1">
-                <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Produtividade Total (Auto)</label>
-                <input type="text" readOnly value={formData.produtividade_total.toLocaleString('pt-BR')} className="w-full bg-slate-100 border border-gray-200 rounded p-2 text-sm font-black text-slate-700" />
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Produtividade Total (Auto)</label>
+                <input type="text" readOnly value={formData.produtividade_total.toLocaleString('pt-BR')} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-black text-slate-700 bg-slate-100 outline-none" />
               </div>
 
               <div className="col-span-3 md:col-span-1">
-                <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Limite Lombada (mm)</label>
-                <input type="number" min="0" value={formData.limite_lombada} onChange={e => setFormData({...formData, limite_lombada: Number(e.target.value)})} className="w-full border border-gray-300 rounded p-2 text-sm" />
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Limite Lombada (mm)</label>
+                <input type="number" min="0" value={formData.limite_lombada} onChange={e => setFormData({...formData, limite_lombada: Number(e.target.value)})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-medium text-slate-800 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
               </div>
 
-              <div className="col-span-3 grid grid-cols-3 gap-4 border-t border-slate-100 pt-4 mt-2">
+              <div className="col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-slate-100 pt-4 mt-2">
                 <div className="col-span-1">
-                  <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Tempo Setup (hh:mm)</label>
-                  <input type="text" value={formData.setup || ''} onChange={e => setFormData({...formData, setup: e.target.value})} placeholder="00:00" className="w-full border border-gray-300 rounded p-2 text-sm font-mono text-center" />
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Tempo Setup (hh:mm)</label>
+                  <input type="text" value={formData.setup || ''} onChange={e => setFormData({...formData, setup: e.target.value})} placeholder="00:00" className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-medium text-slate-800 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-mono text-center" />
                 </div>
                 <div className="col-span-1">
-                  <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Tempo Frete (hh:mm)</label>
-                  <input type="text" value={formData.frete || ''} onChange={e => setFormData({...formData, frete: e.target.value})} placeholder="00:00" className="w-full border border-gray-300 rounded p-2 text-sm font-mono text-center" />
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Tempo Frete (hh:mm)</label>
+                  <input type="text" value={formData.frete || ''} onChange={e => setFormData({...formData, frete: e.target.value})} placeholder="00:00" className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-medium text-slate-800 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-mono text-center" />
                 </div>
                 <div className="col-span-1">
-                  <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Setup + Frete (Auto)</label>
-                  <input type="text" readOnly value={formData.ajuste || '00:00'} className="w-full bg-slate-100 border border-gray-200 rounded p-2 text-sm font-mono font-black text-slate-700 text-center" />
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Setup + Frete (Auto)</label>
+                  <input type="text" readOnly value={formData.ajuste || '00:00'} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-mono font-black text-slate-700 text-center bg-slate-100 outline-none" />
                 </div>
               </div>
 
               {formData.tipo === 'Impressão' && (
-                <div className="col-span-3 bg-blue-50 border border-blue-200 p-4 rounded-lg grid grid-cols-3 gap-4 mt-2">
+                <div className="col-span-3 bg-blue-50 border border-blue-200 p-4 rounded-lg grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
                   <div className="col-span-3"><h5 className="text-xs font-black text-blue-900 uppercase tracking-wider">⚙️ Configurações de Impressão</h5></div>
                   <div>
                     <label className="block text-xs font-bold text-blue-700 mb-1">Págs por Caderno</label>
-                    <input type="number" min="1" value={formData.pgs_caderno} onChange={e => setFormData({...formData, pgs_caderno: Number(e.target.value)})} className="w-full border border-blue-300 rounded p-2 text-sm bg-white font-bold" />
+                    <input type="number" min="1" value={formData.pgs_caderno} onChange={e => setFormData({...formData, pgs_caderno: Number(e.target.value)})} className="w-full border border-blue-200 rounded-lg p-2.5 text-sm bg-white font-bold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
                   </div>
                 </div>
               )}
 
               {formData.tipo === 'Alceadeira' && (
-                <div className="col-span-3 bg-amber-50 border border-amber-200 p-4 rounded-lg grid grid-cols-3 gap-4 mt-2">
+                <div className="col-span-3 bg-amber-50 border border-amber-200 p-4 rounded-lg grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
                   <div className="col-span-3"><h5 className="text-xs font-black text-amber-900 uppercase tracking-wider">⚙️ Configurações de Alceamento</h5></div>
                   <div>
                     <label className="block text-xs font-bold text-amber-700 mb-1">Quantidade de Gavetas</label>
-                    <input type="number" min="1" value={formData.gavetas} onChange={e => setFormData({...formData, gavetas: Number(e.target.value)})} className="w-full border border-amber-300 rounded p-2 text-sm bg-white font-bold" />
+                    <input type="number" min="1" value={formData.gavetas} onChange={e => setFormData({...formData, gavetas: Number(e.target.value)})} className="w-full border border-amber-200 rounded-lg p-2.5 text-sm bg-white font-bold focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all" />
                   </div>
                 </div>
               )}
 
               {formData.tipo === 'Coladeira' && (
-                <div className="col-span-3 bg-amber-50 border border-amber-200 p-4 rounded-lg grid grid-cols-3 gap-4 mt-2">
+                <div className="col-span-3 bg-amber-50 border border-amber-200 p-4 rounded-lg grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
                   <div className="col-span-3"><h5 className="text-xs font-black text-amber-900 uppercase tracking-wider">⚙️ Configurações de Coladeira</h5></div>
                   <div>
                     <label className="block text-xs font-bold text-amber-700 mb-1">Quantidade de Gavetas</label>
-                    <input type="number" min="1" value={formData.gavetas} onChange={e => setFormData({...formData, gavetas: Number(e.target.value)})} className="w-full border border-amber-300 rounded p-2 text-sm bg-white font-bold" />
+                    <input type="number" min="1" value={formData.gavetas} onChange={e => setFormData({...formData, gavetas: Number(e.target.value)})} className="w-full border border-amber-200 rounded-lg p-2.5 text-sm bg-white font-bold focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all" />
                   </div>
                 </div>
               )}
 
               {formData.tipo === 'Grampo' && (
-                <div className="col-span-3 bg-amber-50 border border-amber-200 p-4 rounded-lg grid grid-cols-3 gap-4 mt-2">
+                <div className="col-span-3 bg-amber-50 border border-amber-200 p-4 rounded-lg grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
                   <div className="col-span-3"><h5 className="text-xs font-black text-amber-900 uppercase tracking-wider">⚙️ Configurações de Grampeadeira</h5></div>
                   <div>
                     <label className="block text-xs font-bold text-amber-700 mb-1">Quantidade de Gavetas</label>
-                    <input type="number" min="1" value={formData.gavetas} onChange={e => setFormData({...formData, gavetas: Number(e.target.value)})} className="w-full border border-amber-300 rounded p-2 text-sm bg-white font-bold" />
+                    <input type="number" min="1" value={formData.gavetas} onChange={e => setFormData({...formData, gavetas: Number(e.target.value)})} className="w-full border border-amber-200 rounded-lg p-2.5 text-sm bg-white font-bold focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all" />
                   </div>
                 </div>
               )}
 
               {formData.tipo === 'Espiral' && (
-                <div className="col-span-3 bg-purple-50 border border-purple-200 p-4 rounded-lg grid grid-cols-3 gap-4 mt-2">
+                <div className="col-span-3 bg-purple-50 border border-purple-200 p-4 rounded-lg grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
                   <div className="col-span-3"><h5 className="text-xs font-black text-purple-900 uppercase tracking-wider">⚙️ Configurações de Espiralação Automática</h5></div>
                   <div>
                     <label className="block text-xs font-bold text-purple-700 mb-1">Ciclos por Minuto</label>
-                    <input type="number" min="0" value={formData.ciclos_min} onChange={e => setFormData({...formData, ciclos_min: Number(e.target.value)})} className="w-full border border-purple-300 rounded p-2 text-sm bg-white font-bold" />
+                    <input type="number" min="0" value={formData.ciclos_min} onChange={e => setFormData({...formData, ciclos_min: Number(e.target.value)})} className="w-full border border-purple-200 rounded-lg p-2.5 text-sm bg-white font-bold focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all" />
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-purple-700 mb-1">Divisão (mm)</label>
-                    <input type="number" step="0.01" min="0" value={formData.divisao_mm} onChange={e => setFormData({...formData, divisao_mm: Number(e.target.value)})} className="w-full border border-purple-300 rounded p-2 text-sm bg-white font-bold" />
+                    <input type="number" step="0.01" min="0" value={formData.divisao_mm} onChange={e => setFormData({...formData, divisao_mm: Number(e.target.value)})} className="w-full border border-purple-200 rounded-lg p-2.5 text-sm bg-white font-bold focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all" />
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-purple-700 mb-1">Velocidade Limite (L/H)</label>
-                    <input type="number" min="0" value={formData.velocidade_limite} onChange={e => setFormData({...formData, velocidade_limite: Number(e.target.value)})} className="w-full border border-purple-300 rounded p-2 text-sm bg-white font-bold" />
+                    <input type="number" min="0" value={formData.velocidade_limite} onChange={e => setFormData({...formData, velocidade_limite: Number(e.target.value)})} className="w-full border border-purple-200 rounded-lg p-2.5 text-sm bg-white font-bold focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all" />
                   </div>
                 </div>
               )}
 
-              <div className="col-span-3 mt-4 pt-4 border-t border-gray-200 flex justify-end gap-3 shrink-0">
-                <button type="button" onClick={() => setModalAberto(false)} className="px-5 py-2.5 text-sm font-bold text-red-600 hover:text-red-800 border border-red-200 hover:bg-red-50 rounded transition-colors">Cancelar</button>
-                <button type="submit" className="bg-blue-600 text-white px-6 py-2.5 rounded hover:bg-blue-700 font-bold shadow-sm">Salvar Máquina</button>
+              <div className="col-span-3 mt-4 pt-4 border-t border-slate-200 flex justify-end gap-3 shrink-0">
+                <button type="button" onClick={() => setModalAberto(false)} className="bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300 font-bold py-2.5 px-5 rounded-lg shadow-sm transition-all text-sm">Cancelar</button>
+                <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-5 rounded-lg shadow-sm shadow-blue-600/20 transition-all text-sm flex items-center gap-2">Salvar Máquina</button>
               </div>
             </form>
           </div>

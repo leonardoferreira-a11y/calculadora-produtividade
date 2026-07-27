@@ -5,8 +5,9 @@ export async function POST(request) {
   try {
     const { email, senha } = await request.json();
 
-    // 1. Busca pelo e-mail
-    const result = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email]);
+    // 1. Busca pelo e-mail (case-insensitive + sem espaços — evita 404 falso por
+    //    diferença de maiúsculas/minúsculas ou espaço acidental digitado pelo usuário)
+    const result = await pool.query('SELECT * FROM usuarios WHERE LOWER(TRIM(email)) = LOWER(TRIM($1))', [email]);
 
     // 2. Checa se o e-mail existe
     if (result.rows.length === 0) {
@@ -15,8 +16,9 @@ export async function POST(request) {
 
     const usuario = result.rows[0];
 
-    // 3. Checa se o usuário está bloqueado
-    if (usuario.status === 'inativo') {
+    // 3. Checa se o usuário está bloqueado (compara sem diferenciar caixa —
+    //    o banco grava "Ativo"/"Inativo" com inicial maiúscula)
+    if (String(usuario.status || '').toLowerCase() === 'inativo') {
       return NextResponse.json({ message: "Usuário bloqueado. Contate o administrador." }, { status: 403 });
     }
 
