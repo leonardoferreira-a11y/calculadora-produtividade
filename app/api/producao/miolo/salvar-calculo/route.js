@@ -31,7 +31,7 @@ export async function POST(request) {
         [sku_limpo, filtro_limpo, grafica_limpa]
       );
       if (check.rows.length > 0) {
-        await pool.query(`UPDATE os_calculos SET dados_calculo = $1, data_calculo = CURRENT_TIMESTAMP WHERE id = $2`, [JSON.stringify(dados_calculo), check.rows[0].id]);
+        await pool.query(`UPDATE os_calculos SET dados_calculo = $1, atualizado_em = CURRENT_TIMESTAMP WHERE id = $2`, [JSON.stringify(dados_calculo), check.rows[0].id]);
       } else {
         await pool.query(`INSERT INTO os_calculos (sku_miolo, filtro_producao, grafica, dados_calculo) VALUES ($1, $2, $3, $4)`, [sku_limpo, filtro_limpo, grafica_limpa, JSON.stringify(dados_calculo)]);
       }
