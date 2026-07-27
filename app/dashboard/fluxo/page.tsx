@@ -342,24 +342,24 @@ export default function DashboardFluxoGargalos() {
   return (
     <div className="w-full min-h-screen bg-slate-100 font-sans flex flex-col">
       <div className="w-full px-4 sm:px-8 py-6">
-        <header className="mb-6">
-          <h1 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Dashboards de Produção</h1>
-          <p className="text-slate-500 text-sm mt-1">Mapeamento de Fluxo, Gargalos e Nivelamento de Capacidade</p>
+        <header className="mb-6 border-b border-slate-200 pb-4">
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">Dashboards de Produção</h1>
+          <p className="text-sm text-slate-500 font-medium mt-1">Mapeamento de Fluxo, Gargalos e Nivelamento de Capacidade</p>
         </header>
 
         <div className="flex flex-wrap gap-4 items-center mb-6 border-b border-slate-200 pb-4">
           <div className="flex gap-2 bg-slate-200/60 p-1 rounded-lg">
             {graficasDisponiveis.map((graf, i) => (
-              <button key={i} onClick={() => carregarDadosDoGantt(graf)} className={`px-4 py-1.5 rounded font-bold uppercase text-xs transition-all ${graficaSelecionada === graf ? 'bg-slate-800 text-white shadow-md' : 'text-slate-600 hover:bg-white hover:shadow-sm'}`}>{graf}</button>
+              <button key={i} onClick={() => carregarDadosDoGantt(graf)} className={`px-4 py-1.5 rounded-lg font-bold uppercase text-xs transition-all ${graficaSelecionada === graf ? 'bg-slate-800 text-white shadow-md' : 'text-slate-600 hover:bg-white hover:shadow-sm'}`}>{graf}</button>
             ))}
           </div>
 
           <div className="h-6 w-px bg-slate-300 mx-2"></div>
 
           <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200 shadow-sm">
-            <button onClick={() => setVisao('DIAS')} className={`text-[10px] font-bold px-3 py-1.5 rounded transition-colors ${visao === 'DIAS' ? 'bg-violet-500 text-white' : 'text-slate-500 hover:text-slate-800'}`}>DIAS</button>
-            <button onClick={() => setVisao('SEMANAS')} className={`text-[10px] font-bold px-3 py-1.5 rounded transition-colors ${visao === 'SEMANAS' ? 'bg-violet-500 text-white' : 'text-slate-500 hover:text-slate-800'}`}>SEMANAS</button>
-            <button onClick={() => setVisao('MESES')} className={`text-[10px] font-bold px-3 py-1.5 rounded transition-colors ${visao === 'MESES' ? 'bg-violet-500 text-white' : 'text-slate-500 hover:text-slate-800'}`}>MESES</button>
+            <button onClick={() => setVisao('DIAS')} className={`text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors ${visao === 'DIAS' ? 'bg-violet-500 text-white' : 'text-slate-500 hover:text-slate-800'}`}>DIAS</button>
+            <button onClick={() => setVisao('SEMANAS')} className={`text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors ${visao === 'SEMANAS' ? 'bg-violet-500 text-white' : 'text-slate-500 hover:text-slate-800'}`}>SEMANAS</button>
+            <button onClick={() => setVisao('MESES')} className={`text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors ${visao === 'MESES' ? 'bg-violet-500 text-white' : 'text-slate-500 hover:text-slate-800'}`}>MESES</button>
           </div>
 
           <div className="relative flex items-center bg-white rounded-lg border border-slate-200 px-3 py-1.5 shadow-sm">
@@ -374,8 +374,8 @@ export default function DashboardFluxoGargalos() {
             </button>
             {showFiltroLote && (
               <div className="absolute top-full right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border border-slate-200 p-3 z-[9000]">
-                <div className="flex justify-between items-center mb-2 border-b pb-2"><span className="text-[10px] font-black uppercase text-slate-500">Filtros</span><button onClick={() => setLotesAtivos([])} className="text-[10px] text-violet-600 font-bold">Limpar</button></div>
-                <div className="max-h-64 overflow-y-auto space-y-1">{lotesExistentes.map(lote => (<label key={lote} className="flex items-center gap-2 text-xs font-bold text-slate-700 p-1.5 hover:bg-slate-50 rounded cursor-pointer"><input type="checkbox" className="w-4 h-4 accent-violet-600" checked={lotesAtivos.includes(lote)} onChange={() => setLotesAtivos(prev => prev.includes(lote) ? prev.filter(l => l !== lote) : [...prev, lote])} /><span className="w-3 h-3 rounded-full bg-slate-300"></span>{lote}</label>))}</div>
+                <div className="flex justify-between items-center mb-2 border-b border-slate-200 pb-2"><span className="text-[10px] font-black uppercase text-slate-500">Filtros</span><button onClick={() => setLotesAtivos([])} className="text-[10px] text-violet-600 font-bold">Limpar</button></div>
+                <div className="max-h-64 overflow-y-auto space-y-1">{lotesExistentes.map(lote => (<label key={lote} className="flex items-center gap-2 text-xs font-bold text-slate-700 p-1.5 hover:bg-slate-50 rounded-lg cursor-pointer"><input type="checkbox" className="w-4 h-4 accent-violet-600" checked={lotesAtivos.includes(lote)} onChange={() => setLotesAtivos(prev => prev.includes(lote) ? prev.filter(l => l !== lote) : [...prev, lote])} /><span className="w-3 h-3 rounded-full bg-slate-300"></span>{lote}</label>))}</div>
               </div>
             )}
           </div>
@@ -424,7 +424,7 @@ export default function DashboardFluxoGargalos() {
 
                   return (
                     <div key={idx} className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col w-full overflow-hidden">
-                      <header className="bg-slate-50 border-b p-3 px-5 flex justify-between items-center">
+                      <header className="bg-slate-50 border-b border-slate-200 p-3 px-5 flex justify-between items-center">
                         <h3 className="font-black text-slate-700 text-sm uppercase flex items-center gap-2">
                           <i className="fas fa-microchip text-slate-400"></i> {mq.nome}
                         </h3>

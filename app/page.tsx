@@ -7,6 +7,7 @@ export default function LoginCalculArco() {
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [erro, setErro] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
 
   const handleLogin = async (e: any) => {
@@ -79,14 +80,24 @@ export default function LoginCalculArco() {
 
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">Senha de acesso</label>
-            <input
-              type="password"
-              value={senha}
-              onChange={(e) => setSenha(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-300 rounded-lg px-4 py-3 text-slate-900 outline-none focus:bg-white focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/20 transition-all"
-              placeholder="••••••••"
-              required
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={senha}
+                onChange={(e) => setSenha(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-4 py-3 pr-12 text-slate-900 outline-none focus:bg-white focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/20 transition-all"
+                placeholder="••••••••"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                className="absolute inset-y-0 right-0 flex items-center px-4 text-slate-400 hover:text-[#3b82f6] transition-colors"
+              >
+                <i className={showPassword ? 'fas fa-eye-slash' : 'fas fa-eye'}></i>
+              </button>
+            </div>
           </div>
 
           <button

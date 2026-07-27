@@ -83,26 +83,26 @@ export default function PortalPCP() {
 
   return (
     <div className="w-full relative">
-      <header className="mb-6 border-b-2 border-slate-200 pb-4 flex justify-between items-end">
+      <header className="mb-6 border-b border-slate-200 pb-4 flex flex-col md:flex-row md:justify-between md:items-end gap-4">
         <div>
-          <h1 className="text-2xl font-black text-slate-800 uppercase">Portal PCP</h1>
-          <p className="text-gray-600 font-medium mt-1">Visualizador de CSV — sem integrações, 100% client-side</p>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">Portal PCP</h1>
+          <p className="text-sm text-slate-500 font-medium mt-1">Visualizador de CSV — sem integrações, 100% client-side</p>
         </div>
         {rows.length > 0 && (
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
             <input type="text" placeholder="Filtrar em todos os campos..." value={filterQuery}
               onChange={e => setFilterQuery(e.target.value)}
-              className="border border-slate-200 rounded px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-slate-400 w-56" />
+              className="border border-slate-200 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-800 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all w-full sm:w-56" />
             <span className="text-xs font-mono text-slate-500">{filteredRows.length}/{rows.length} linhas</span>
             <button
               onClick={handleImport}
               disabled={isImporting}
-              className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 border border-blue-700 px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors"
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-5 rounded-lg shadow-sm shadow-blue-600/20 transition-all text-sm flex items-center gap-2 disabled:opacity-50"
             >
               {isImporting ? <><i className="fas fa-spinner fa-spin"></i> Importando...</> : <><i className="fas fa-database"></i> Importar para Banco</>}
             </button>
-            <button onClick={clearData} className="text-xs font-bold text-red-600 border border-red-200 px-3 py-1.5 rounded hover:bg-red-50">
-              <i className="fas fa-times mr-1"></i> Limpar
+            <button onClick={clearData} className="bg-white border border-slate-200 text-red-600 hover:bg-red-50 hover:border-red-200 font-bold py-2.5 px-5 rounded-lg shadow-sm transition-all text-sm flex items-center gap-2">
+              <i className="fas fa-times"></i> Limpar
             </button>
           </div>
         )}
@@ -142,7 +142,7 @@ export default function PortalPCP() {
           </div>
           <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-auto max-h-[calc(100vh-320px)]">
             <table className="w-full text-left border-collapse text-xs min-w-max">
-              <thead className="sticky top-0 bg-slate-800 text-white text-[10px] uppercase font-bold tracking-wider shadow-md">
+              <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold tracking-wider shadow-sm">
                 <tr>
                   <th className="p-2 pl-3 text-slate-400 font-mono w-12">#</th>
                   {headers.map((h, i) => (
@@ -150,9 +150,9 @@ export default function PortalPCP() {
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
                 {filteredRows.map((row, rIdx) => (
-                  <tr key={rIdx} className={`hover:bg-slate-50 transition-colors ${rIdx % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
+                  <tr key={rIdx} className={`hover:bg-slate-50/50 transition-colors ${rIdx % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
                     <td className="p-2 pl-3 text-slate-400 font-mono text-[10px]">{rIdx + 1}</td>
                     {headers.map((h, cIdx) => (
                       <td key={cIdx} className="p-2 px-3 text-slate-700 whitespace-nowrap max-w-[200px] truncate" title={row[h] || ''}>

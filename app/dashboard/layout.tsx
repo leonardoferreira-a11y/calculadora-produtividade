@@ -12,7 +12,6 @@ const RBAC: Record<string, string[]> = {
   '/dashboard/calculo-kits': ['ADMIN', 'USER_ARCO', 'USER_GRAFICA'],
   '/dashboard/gantt':      ['ADMIN', 'ADMIN_MAQ', 'USER_ARCO'],
   // '/dashboard/fluxo':   ['ADMIN', 'USER_ARCO'],  // oculto — módulo interno
-  '/dashboard/pcp':        ['ADMIN', 'USER_ARCO'],
   '/dashboard/acessos':    ['ADMIN'],
 };
 
@@ -35,7 +34,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { titulo: 'Cálculo de Kits',       rota: '/dashboard/calculo-kits' },
     { titulo: 'Gantt',                 rota: '/dashboard/gantt' },
     // { titulo: 'Dashboard - Fluxo', rota: '/dashboard/fluxo' },  // oculto — módulo interno
-    { titulo: 'Portal PCP',            rota: '/dashboard/pcp' },
     { titulo: 'Acessos',               rota: '/dashboard/acessos' },
   ];
 
@@ -46,11 +44,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   });
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col font-sans text-gray-900">
+    <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900">
       <header className="bg-slate-900 text-white shadow-md z-50">
-        <div className="w-full px-8 flex justify-between items-center h-16">
+        <div className="w-full px-4 md:px-8 py-3 md:py-0 flex flex-col md:flex-row md:justify-between md:items-center gap-4 md:gap-0 md:h-16">
 
-          <div className="flex items-center gap-10">
+          <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-10">
             {/* LOGO */}
             <div className="flex items-center gap-3">
               <img
@@ -62,7 +60,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <span className="text-xl font-bold uppercase tracking-wider">CalculArco</span>
             </div>
 
-            <nav className="flex space-x-2">
+            <nav className="flex flex-wrap gap-2">
               {menuVisivel.map(item => {
                 const isActive = item.rota === '/dashboard'
                   ? pathname === '/dashboard'
@@ -72,7 +70,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     className={`px-4 py-2 rounded font-bold text-sm transition-colors
                       ${isActive
                         ? 'bg-blue-600 text-white'
-                        : 'text-gray-300 hover:bg-slate-800 hover:text-white'}
+                        : 'text-slate-300 hover:bg-slate-800 hover:text-white'}
                     `}
                   >
                     {item.titulo}
@@ -82,9 +80,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </nav>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-3 md:gap-4">
             <span className="text-xs font-bold text-slate-500 uppercase bg-slate-800 px-2 py-0.5 rounded border border-slate-700">{nivelUp}</span>
-            <span className="text-sm font-bold text-gray-300 uppercase">{nome}</span>
+            <span className="text-sm font-bold text-slate-300 uppercase">{nome}</span>
             <button
               onClick={() => { localStorage.clear(); router.push('/'); }}
               className="text-red-400 hover:text-red-300 text-sm font-bold uppercase border-l border-slate-700 pl-4"
@@ -96,7 +94,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </header>
 
-      <main className="flex-1 w-full px-8 py-8 flex flex-col items-start">
+      <main className="flex-1 w-full px-4 md:px-8 py-6 md:py-8 flex flex-col items-start">
         {children}
       </main>
     </div>

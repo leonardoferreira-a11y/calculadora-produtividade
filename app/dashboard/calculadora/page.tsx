@@ -128,21 +128,21 @@ export default function CalculadoraProducao() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <div>
             <label className="block text-xs font-bold text-slate-600 mb-1">Gráfica</label>
-            <select className="w-full border border-slate-300 rounded-lg p-2.5 outline-none font-medium text-sm" value={estado.grafica} onChange={e => setEstado({ grafica: e.target.value, tipo: '', maquinaId: '' })}>
+            <select className="w-full border border-slate-200 rounded-lg p-2.5 outline-none font-medium text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" value={estado.grafica} onChange={e => setEstado({ grafica: e.target.value, tipo: '', maquinaId: '' })}>
               <option value="">Selecione...</option>
               {graficasDisponiveis.map(g => <option key={g as string} value={g as string}>{g as string}</option>)}
             </select>
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-600 mb-1">Tipo Impressão</label>
-            <select className="w-full border border-slate-300 rounded-lg p-2.5 outline-none font-medium text-sm disabled:bg-slate-100" value={estado.tipo} onChange={e => setEstado({ ...estado, tipo: e.target.value, maquinaId: '' })} disabled={!estado.grafica}>
+            <select className="w-full border border-slate-200 rounded-lg p-2.5 outline-none font-medium text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all disabled:bg-slate-100" value={estado.tipo} onChange={e => setEstado({ ...estado, tipo: e.target.value, maquinaId: '' })} disabled={!estado.grafica}>
               <option value="">-</option>
               {tiposDisponiveis.map(t => <option key={t as string} value={t as string}>{t as string}</option>)}
             </select>
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-600 mb-1">Máquina</label>
-            <select className="w-full border border-slate-300 rounded-lg p-2.5 outline-none font-medium text-sm disabled:bg-slate-100 font-bold text-[#15192b]" value={estado.maquinaId} onChange={e => setEstado({ ...estado, maquinaId: e.target.value })} disabled={!estado.tipo}>
+            <select className="w-full border border-slate-200 rounded-lg p-2.5 outline-none font-medium text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all disabled:bg-slate-100 font-bold text-[#15192b]" value={estado.maquinaId} onChange={e => setEstado({ ...estado, maquinaId: e.target.value })} disabled={!estado.tipo}>
               <option value="">-</option>
               {maquinasDisponiveis.map(m => <option key={m.id} value={m.id}>{m.maquina}</option>)}
             </select>
@@ -150,16 +150,16 @@ export default function CalculadoraProducao() {
         </div>
 
         <div className="grid grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-dashed border-slate-300 mb-4">
-          <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Giro/Hora</label><input type="text" readOnly value={calc.giroHora ? calc.giroHora.toLocaleString('pt-BR') : ''} className="w-full bg-slate-100 border border-slate-200 rounded p-2 text-sm font-bold text-slate-500" /></div>
-          <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pgs/Caderno</label><input type="text" readOnly value={calc.pgsCaderno || ''} className="w-full bg-slate-100 border border-slate-200 rounded p-2 text-sm font-bold text-slate-500" /></div>
-          <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Setup Unit.</label><input type="text" readOnly value={calc.setupString} className="w-full bg-slate-100 border border-slate-200 rounded p-2 text-sm font-bold text-slate-500" /></div>
+          <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Giro/Hora</label><input type="text" readOnly value={calc.giroHora ? calc.giroHora.toLocaleString('pt-BR') : ''} className="w-full bg-slate-100 border border-slate-200 rounded-lg p-2 text-sm font-bold text-slate-500" /></div>
+          <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pgs/Caderno</label><input type="text" readOnly value={calc.pgsCaderno || ''} className="w-full bg-slate-100 border border-slate-200 rounded-lg p-2 text-sm font-bold text-slate-500" /></div>
+          <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Setup Unit.</label><input type="text" readOnly value={calc.setupString} className="w-full bg-slate-100 border border-slate-200 rounded-lg p-2 text-sm font-bold text-slate-500" /></div>
         </div>
 
         <div className={`grid grid-cols-4 gap-4 ${tema.bg} p-4 rounded-xl border ${tema.border} mb-6`}>
-          <div><label className={`block text-[9px] font-bold ${tema.text} uppercase mb-1`}>1. Qtd Cadernos</label><input type="text" readOnly value={calc.qtdCadernos || ''} className="w-full bg-white border border-white rounded p-2 text-sm font-black text-slate-800 shadow-sm" /></div>
-          <div><label className={`block text-[9px] font-bold ${tema.text} uppercase mb-1`}>2. Total Giros</label><input type="text" readOnly value={calc.totalGiros ? calc.totalGiros.toLocaleString('pt-BR') : ''} className="w-full bg-white border border-white rounded p-2 text-sm font-black text-slate-800 shadow-sm" /></div>
-          <div><label className={`block text-[9px] font-bold ${tema.text} uppercase mb-1`}>3. Rodagem (HH:MM)</label><input type="text" readOnly value={decimalParaHHMM(calc.rodagemPuraHrs)} className="w-full bg-white border border-white rounded p-2 text-sm font-black text-slate-800 shadow-sm" /></div>
-          <div><label className={`block text-[9px] font-bold ${tema.text} uppercase mb-1`}>4. Setup Total</label><input type="text" readOnly value={decimalParaHHMM(calc.setupTotalHrs)} className="w-full bg-white border border-white rounded p-2 text-sm font-black text-slate-800 shadow-sm" /></div>
+          <div><label className={`block text-[9px] font-bold ${tema.text} uppercase mb-1`}>1. Qtd Cadernos</label><input type="text" readOnly value={calc.qtdCadernos || ''} className="w-full bg-white border border-white rounded-lg p-2 text-sm font-black text-slate-800 shadow-sm" /></div>
+          <div><label className={`block text-[9px] font-bold ${tema.text} uppercase mb-1`}>2. Total Giros</label><input type="text" readOnly value={calc.totalGiros ? calc.totalGiros.toLocaleString('pt-BR') : ''} className="w-full bg-white border border-white rounded-lg p-2 text-sm font-black text-slate-800 shadow-sm" /></div>
+          <div><label className={`block text-[9px] font-bold ${tema.text} uppercase mb-1`}>3. Rodagem (HH:MM)</label><input type="text" readOnly value={decimalParaHHMM(calc.rodagemPuraHrs)} className="w-full bg-white border border-white rounded-lg p-2 text-sm font-black text-slate-800 shadow-sm" /></div>
+          <div><label className={`block text-[9px] font-bold ${tema.text} uppercase mb-1`}>4. Setup Total</label><input type="text" readOnly value={decimalParaHHMM(calc.setupTotalHrs)} className="w-full bg-white border border-white rounded-lg p-2 text-sm font-black text-slate-800 shadow-sm" /></div>
         </div>
 
         <div className={`${tema.bgResult} border ${tema.borderResult} rounded-xl p-4 flex justify-between items-center shadow-inner`}>
@@ -174,7 +174,7 @@ export default function CalculadoraProducao() {
     <div className="min-h-screen bg-slate-50 p-8">
       {/* ... [CABEÇALHO FICA IGUAL] ... */}
       <header className="max-w-7xl mx-auto flex justify-between items-center mb-8 border-b border-slate-200 pb-6">
-        <div><h1 className="text-3xl font-black text-[#15192b]">Calculadora de Produção</h1></div>
+        <div><h1 className="text-2xl font-black text-slate-900 tracking-tight">Calculadora de Produção</h1></div>
       </header>
 
       <main className="max-w-7xl mx-auto mb-12">
