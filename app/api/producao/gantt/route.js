@@ -432,7 +432,7 @@ export async function POST(request) {
           }
         }
 
-        // 🔴 KITS BLINDADOS: Amarração inteligente com Fallback Salvador!
+        // 🔴 KITS BLINDADOS: Amarração inteligente com Fallback Salvador e Correção Temporal!
         if (t._isKit) {
             const GET_LOTE = (val) => {
                 let s = UPPER_CASE(val);
@@ -440,18 +440,13 @@ export async function POST(request) {
             };
 
             let loteAlvo = GET_LOTE(t._kitFiltroOriginal !== undefined ? t._kitFiltroOriginal : t.filtro_producao);
-
-            // CORREÇÃO BUG 1: Chave consistente com mapeamento
-            // O SKU do Kit deve ser procurado em mapaComponentesKit com chave normalizada
             let chaveMapaKit = `${t._skuUp}_${loteAlvo}`;
             let baseComp = t._kitSkus && t._kitSkus.length > 0 ? t._kitSkus : (mapaComponentesKit.get(chaveMapaKit) || []);
 
-            // Se não encontrou com lote exato, tenta sem especificar lote (fallback)
             if (baseComp.length === 0) {
                 for (const [chave, comp] of mapaComponentesKit) {
                     if (chave.startsWith(`${t._skuUp}_`)) {
                         baseComp = comp;
-                        console.log(`[KIT-DEBUG] Kit ${t._skuUp}: Fallback encontrou componentes na chave ${chave}`);
                         break;
                     }
                 }
@@ -463,23 +458,20 @@ export async function POST(request) {
                 let todosResolvidos = true;
                 let maxFimComponentes = tempoProntidaoTecnica;
                 let precisaCura = false;
+                let usouFallback = false;
 
                 for (const compSku of componentes) {
                     const tarefasDoComp = resolvidasPorSku.get(compSku) || [];
                     const compIndef = indefinitasPorSku.get(compSku) || [];
 
-                    // Tira as próprias tarefas de Kit da verificação (para não causar Loop)
                     let cIndef = compIndef.filter(r => r.id !== t.id && !(t.nome_etapa === 'Shrink' && r.nome_etapa === 'Encaixotamento'));
                     let cRes = tarefasDoComp.filter(r => r.id !== t.id && !(t.nome_etapa === 'Shrink' && r.nome_etapa === 'Encaixotamento'));
 
-                    // Tenta casar pelo Lote exato
                     let cIndefNoLote = cIndef.filter(r => GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo);
                     let cResNoLote = cRes.filter(r => GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo);
 
-                    // 🚨 FALLBACK SALVADOR: Se não tem nada nesse lote exato, pega tudo desse SKU!
+                    // 🚨 FALLBACK SALVADOR
                     if (cIndefNoLote.length === 0 && cResNoLote.length === 0) {
-                        // Componente não tem tarefas neste lote específico - está embutido em outra peça
-                        // Bloqueia o Kit até que TODAS as tarefas normais (não-kit) do lote sejam concluídas
                         const todasTarefasNaoKitNoLote = indefinitas.filter(r =>
                             !r._isKit &&
                             GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo
@@ -487,19 +479,16 @@ export async function POST(request) {
 
                         if (todasTarefasNaoKitNoLote.length > 0) {
                             todosResolvidos = false;
-                            console.log(`[KIT-DEBUG] Kit ${t.id}: Componente ${compSku} está embutido. Bloqueado até terminar todas as tarefas do lote ${loteAlvo}`);
                             break;
                         }
 
-                        // Se não tem nenhuma tarefa normal neste lote, assume que componente está embutido
-                        // Não adiciona tarefas a verificar, apenas continua
+                        usouFallback = true;
                         cIndefNoLote = [];
                         cResNoLote = [];
                     }
 
                     if (cIndefNoLote.length > 0) {
                         todosResolvidos = false;
-                        console.log(`[KIT-DEBUG] Kit ${t.id} aguardando: ${compSku} ainda tem tarefas indefinidas (${cIndefNoLote.length})`);
                         break;
                     }
 
@@ -507,6 +496,18 @@ export async function POST(request) {
                         const fim = new Date(tc.data_fim);
                         if (fim > maxFimComponentes) maxFimComponentes = fim;
                         if (tc._isPUR) precisaCura = true;
+                    }
+                }
+
+                // 🔴 FIX TEMPORAL: Ajusta o relógio para o fim do lote caso o fallback tenha sido usado
+                if (usouFallback && todosResolvidos) {
+                    const tarefasResolvidasNoLote = Array.from(resolvidasMap.values()).filter(r =>
+                        !r._isKit &&
+                        GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo
+                    );
+                    for (const tr of tarefasResolvidasNoLote) {
+                        const fim = new Date(tr.data_fim);
+                        if (fim > maxFimComponentes) maxFimComponentes = fim;
                     }
                 }
 
@@ -519,11 +520,10 @@ export async function POST(request) {
                     if (maxFimComponentes > tempoProntidaoTecnica) {
                         tempoProntidaoTecnica = maxFimComponentes;
                     }
-                    // Se a tarefa (ex: Encaixotamento) tiver pai direto (Shrink), espera ele acabar também!
+                    // Respeita o Pai Direto (Ex: Encaixotamento esperando o Shrink)
                     if (pai && new Date(pai.data_fim) > tempoProntidaoTecnica) {
                         tempoProntidaoTecnica = new Date(pai.data_fim);
                     }
-                    console.log(`[KIT-DEBUG] Kit ${t.id} pronto! tempoProntidaoTecnica=${tempoProntidaoTecnica.toISOString()}`);
                 }
             }
         }
