@@ -122,8 +122,14 @@ export async function POST(request) {
         const dc = kit.dc;
         let shrinkId = null;
 
+        if (dc.shrink?.maquina_id && !dc.shrink?.resultado) {
+            console.warn(`[KIT-DEBUG] Kit ${kit.id_norm} (${kit.filtro_norm}): shrink.maquina_id definido mas shrink.resultado ausente — tarefa de Shrink NÃO injetada.`);
+        }
         if (dc.shrink?.maquina_id && dc.shrink?.resultado) {
             const horas = horasDeString(dc.shrink.resultado.totais?.total);
+            if (horas <= 0) {
+                console.warn(`[KIT-DEBUG] Kit ${kit.id_norm} (${kit.filtro_norm}): shrink com 0h (totais.total="${dc.shrink.resultado.totais?.total}") — tarefa de Shrink NÃO injetada.`);
+            }
             if (horas > 0) {
                 const filtroSanitizado = String(kit.filtro_norm || 'S/ LOTE').replace(/[^a-zA-Z0-9_-]/g, '_');
                 shrinkId = `kit-${kit.id_norm}-${filtroSanitizado}-Shrink`;
@@ -157,8 +163,14 @@ export async function POST(request) {
             }
         }
 
+        if (dc.encaixotamento?.maquina_id && !dc.encaixotamento?.resultado) {
+            console.warn(`[KIT-DEBUG] Kit ${kit.id_norm} (${kit.filtro_norm}): encaixotamento.maquina_id definido mas encaixotamento.resultado ausente — tarefa de Encaixotamento NÃO injetada.`);
+        }
         if (dc.encaixotamento?.maquina_id && dc.encaixotamento?.resultado) {
             const horas = horasDeString(dc.encaixotamento.resultado.totais?.total);
+            if (horas <= 0) {
+                console.warn(`[KIT-DEBUG] Kit ${kit.id_norm} (${kit.filtro_norm}): encaixotamento com 0h (totais.total="${dc.encaixotamento.resultado.totais?.total}") — tarefa de Encaixotamento NÃO injetada.`);
+            }
             if (horas > 0) {
                 const filtroSanitizado = String(kit.filtro_norm || 'S/ LOTE').replace(/[^a-zA-Z0-9_-]/g, '_');
                 const mqData = maquinasReais.find(m => String(m.id) === String(dc.encaixotamento.maquina_id)) || {};
@@ -458,7 +470,6 @@ export async function POST(request) {
                 let todosResolvidos = true;
                 let maxFimComponentes = tempoProntidaoTecnica;
                 let precisaCura = false;
-                let usouFallback = false;
 
                 for (const compSku of componentes) {
                     const tarefasDoComp = resolvidasPorSku.get(compSku) || [];
@@ -470,21 +481,20 @@ export async function POST(request) {
                     let cIndefNoLote = cIndef.filter(r => GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo);
                     let cResNoLote = cRes.filter(r => GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo);
 
-                    // 🚨 FALLBACK SALVADOR
+                    // 🚨 FALLBACK: componente embutido, sem tarefa própria neste lote.
+                    // Espera a tarefa PAI desse componente (o Miolo/SKU alvo do próprio Kit
+                    // naquele lote) — nunca todo o lote, senão o Kit fica preso atrás de
+                    // SKUs não relacionados que podem levar semanas para terminar.
                     if (cIndefNoLote.length === 0 && cResNoLote.length === 0) {
-                        const todasTarefasNaoKitNoLote = indefinitas.filter(r =>
+                        cIndefNoLote = indefinitas.filter(r =>
+                            !r._isKit &&
+                            r._skuUp === t._skuUp &&
+                            GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo
+                        );
+                        cResNoLote = (resolvidasPorSku.get(t._skuUp) || []).filter(r =>
                             !r._isKit &&
                             GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo
                         );
-
-                        if (todasTarefasNaoKitNoLote.length > 0) {
-                            todosResolvidos = false;
-                            break;
-                        }
-
-                        usouFallback = true;
-                        cIndefNoLote = [];
-                        cResNoLote = [];
                     }
 
                     if (cIndefNoLote.length > 0) {
@@ -496,18 +506,6 @@ export async function POST(request) {
                         const fim = new Date(tc.data_fim);
                         if (fim > maxFimComponentes) maxFimComponentes = fim;
                         if (tc._isPUR) precisaCura = true;
-                    }
-                }
-
-                // 🔴 FIX TEMPORAL: Ajusta o relógio para o fim do lote caso o fallback tenha sido usado
-                if (usouFallback && todosResolvidos) {
-                    const tarefasResolvidasNoLote = Array.from(resolvidasMap.values()).filter(r =>
-                        !r._isKit &&
-                        GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo
-                    );
-                    for (const tr of tarefasResolvidasNoLote) {
-                        const fim = new Date(tr.data_fim);
-                        if (fim > maxFimComponentes) maxFimComponentes = fim;
                     }
                 }
 
@@ -638,17 +636,6 @@ export async function POST(request) {
         let machineFreeTime = controleMaquinasFim[mqId] ? Math.min(...controleMaquinasFim[mqId].map(d => d.getTime())) : 0;
         c.ast = Math.max(c.trt.getTime(), machineFreeTime);
       });
-
-      // CORREÇÃO BUG 2: Prioridade MÁXIMA para Kits prontos (agendados imediatamente)
-      // Separa Kits prontos do resto
-      const kitsProntosIndex = candidatosAptos.findIndex(c => c.tarefa._isKit);
-      if (kitsProntosIndex !== -1) {
-        const kitPronto = candidatosAptos[kitsProntosIndex];
-        // Move para primeira posição
-        candidatosAptos.splice(kitsProntosIndex, 1);
-        candidatosAptos.unshift(kitPronto);
-        console.log(`[PRIORITY-DEBUG] Kit ${kitPronto.tarefa.id} elevado para primeira posição`);
-      }
 
       candidatosAptos.sort((a, b) => {
         // Kits prontos SEMPRE primeiro
@@ -800,6 +787,11 @@ export async function POST(request) {
           else indefinitasPorSku.delete(tarefa._skuUp);
       }
       indefinitas = indefinitas.filter(item => item.id !== tarefa.id);
+    }
+
+    if (indefinitas.length > 0) {
+      console.warn(`[GANTT-DEBUG] ${indefinitas.length} tarefa(s) nunca ficaram prontas e foram descartadas do resultado final:`,
+        indefinitas.map(t => ({ id: t.id, etapa: t.nome_etapa, sku: t._skuUp, lote: t.filtro_producao, dep: t._depUp, isKit: t._isKit })));
     }
 
     return new Response(JSON.stringify(tarefasResolvidas), {
