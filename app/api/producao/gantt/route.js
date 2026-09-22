@@ -125,7 +125,8 @@ export async function POST(request) {
         if (dc.shrink?.maquina_id && dc.shrink?.resultado) {
             const horas = horasDeString(dc.shrink.resultado.totais?.total);
             if (horas > 0) {
-                shrinkId = `kit-${kit.id_norm}-Shrink`;
+                const filtroSanitizado = String(kit.filtro_norm || 'S/ LOTE').replace(/[^a-zA-Z0-9_-]/g, '_');
+                shrinkId = `kit-${kit.id_norm}-${filtroSanitizado}-Shrink`;
                 const mqData = maquinasReais.find(m => String(m.id) === String(dc.shrink.maquina_id)) || {};
                 resTarefas.rows.push({
                     id: shrinkId,
@@ -159,9 +160,10 @@ export async function POST(request) {
         if (dc.encaixotamento?.maquina_id && dc.encaixotamento?.resultado) {
             const horas = horasDeString(dc.encaixotamento.resultado.totais?.total);
             if (horas > 0) {
+                const filtroSanitizado = String(kit.filtro_norm || 'S/ LOTE').replace(/[^a-zA-Z0-9_-]/g, '_');
                 const mqData = maquinasReais.find(m => String(m.id) === String(dc.encaixotamento.maquina_id)) || {};
                 resTarefas.rows.push({
-                    id: `kit-${kit.id_norm}-Encaixotamento`,
+                    id: `kit-${kit.id_norm}-${filtroSanitizado}-Encaixotamento`,
                     sku_alvo: kit.id_norm,
                     filtro_producao: kit.filtro_norm || 'S/ LOTE',
                     grafica: kit.grafica,
@@ -476,8 +478,23 @@ export async function POST(request) {
 
                     // 🚨 FALLBACK SALVADOR: Se não tem nada nesse lote exato, pega tudo desse SKU!
                     if (cIndefNoLote.length === 0 && cResNoLote.length === 0) {
-                        cIndefNoLote = cIndef;
-                        cResNoLote = cRes;
+                        // Componente não tem tarefas neste lote específico - está embutido em outra peça
+                        // Bloqueia o Kit até que TODAS as tarefas normais (não-kit) do lote sejam concluídas
+                        const todasTarefasNaoKitNoLote = indefinitas.filter(r =>
+                            !r._isKit &&
+                            GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo
+                        );
+
+                        if (todasTarefasNaoKitNoLote.length > 0) {
+                            todosResolvidos = false;
+                            console.log(`[KIT-DEBUG] Kit ${t.id}: Componente ${compSku} está embutido. Bloqueado até terminar todas as tarefas do lote ${loteAlvo}`);
+                            break;
+                        }
+
+                        // Se não tem nenhuma tarefa normal neste lote, assume que componente está embutido
+                        // Não adiciona tarefas a verificar, apenas continua
+                        cIndefNoLote = [];
+                        cResNoLote = [];
                     }
 
                     if (cIndefNoLote.length > 0) {
