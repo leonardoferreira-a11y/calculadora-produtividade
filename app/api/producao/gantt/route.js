@@ -111,10 +111,16 @@ export async function POST(request) {
         }
     });
 
+    // Formatos aceitos: "HH:MM" ou "N dia(s) + HH:MM" (ex: "1 dia + 11:48")
     const horasDeString = (str) => {
-      if (!str || !String(str).includes(':')) return 0;
-      const [h, m] = String(str).split(':');
-      return parseInt(h) + (parseInt(m) / 60);
+      if (!str) return 0;
+      const s = String(str);
+      let horas = 0;
+      const diaMatch = s.match(/(\d+)\s*dia/i);
+      if (diaMatch) horas += parseInt(diaMatch[1]) * 24;
+      const hmMatch = s.match(/(\d+):(\d+)/);
+      if (hmMatch) horas += parseInt(hmMatch[1]) + (parseInt(hmMatch[2]) / 60);
+      return horas;
     };
 
     // Injeta as tarefas de Kit Virtuais na Esteira Principal
