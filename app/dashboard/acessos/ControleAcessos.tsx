@@ -247,29 +247,32 @@ export default function ControleAcessos() {
                       </span>
                     </td>
                     <td className="p-4 text-slate-500 text-xs font-bold">{formatarData(u.ultimo_login_em)}</td>
-                    <td className="p-4 text-right whitespace-nowrap">
+                    <td className="p-4 text-right whitespace-nowrap flex justify-end gap-2">
                       {situacao === 'pendente' && (
                         <button
                           onClick={() => aprovar(u)}
-                          className="text-slate-400 hover:text-emerald-600 transition-colors p-2"
+                          className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:bg-emerald-50 px-2 py-1 rounded transition-colors"
                           title="Aprovar solicitação de acesso"
                         >
                           <i className="fas fa-user-check"></i>
+                          Aprovar
                         </button>
                       )}
                       <button
                         onClick={() => gerarLink(u)}
-                        className="text-slate-400 hover:text-amber-600 transition-colors p-2"
+                        className="inline-flex items-center gap-1 text-xs font-bold text-amber-600 hover:bg-amber-50 px-2 py-1 rounded transition-colors"
                         title="Gerar link de redefinição de senha"
                       >
                         <i className="fas fa-key"></i>
+                        Redefinir
                       </button>
                       <button
                         onClick={() => abrirEdicao(u)}
-                        className="text-slate-400 hover:text-blue-600 transition-colors p-2"
+                        className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:bg-blue-50 px-2 py-1 rounded transition-colors"
                         title="Editar usuário"
                       >
                         <i className="fas fa-pen"></i>
+                        Editar
                       </button>
                     </td>
                   </tr>
