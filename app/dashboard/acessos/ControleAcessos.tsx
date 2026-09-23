@@ -201,86 +201,90 @@ export default function ControleAcessos() {
         </button>
       </header>
 
-      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-x-auto">
-        <table className="w-full text-left border-collapse text-sm">
-          <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold tracking-wider">
-            <tr>
-              <th className="p-4">Nome</th>
-              <th className="p-4">E-mail</th>
-              <th className="p-4">Empresa</th>
-              <th className="p-4">Nível Permissão</th>
-              <th className="p-4">Status</th>
-              <th className="p-4">Último acesso</th>
-              <th className="p-4 text-right">Ações</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
-            {usuarios.length === 0 ? (
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-sm min-w-max">
+            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold tracking-wider sticky top-0">
               <tr>
-                <td colSpan={7} className="p-6 text-center text-slate-500 font-bold">
-                  Nenhum usuário cadastrado.
-                </td>
+                <th className="p-4">Nome</th>
+                <th className="p-4">E-mail</th>
+                <th className="p-4">Empresa</th>
+                <th className="p-4">Nível Permissão</th>
+                <th className="p-4">Status</th>
+                <th className="p-4">Último acesso</th>
+                <th className="p-4 text-right">Ações</th>
               </tr>
-            ) : (
-              usuarios.map((u) => {
-                const situacao = String(u.status ?? '').toLowerCase();
-                return (
-                  <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="p-4 font-bold text-slate-800">
-                      {u.nome}
-                      {!u.senha_definida && (
-                        <span className="ml-2 text-[10px] font-black uppercase text-amber-600" title="Conta sem senha utilizável">
-                          sem senha
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
+              {usuarios.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="p-6 text-center text-slate-500 font-bold">
+                    Nenhum usuário cadastrado.
+                  </td>
+                </tr>
+              ) : (
+                usuarios.map((u) => {
+                  const situacao = String(u.status ?? '').toLowerCase();
+                  return (
+                    <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="p-4 font-bold text-slate-800">
+                        {u.nome}
+                        {!u.senha_definida && (
+                          <span className="ml-2 text-[10px] font-black uppercase text-amber-600" title="Conta sem senha utilizável">
+                            sem senha
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-4 text-slate-500">{u.email}</td>
+                      <td className="p-4 font-bold text-slate-700">{u.empresa || '-'}</td>
+                      <td className="p-4">
+                        <span className={`px-2 py-1 rounded text-xs font-black ${CORES_NIVEL[u.nivel_permissao] ?? 'bg-slate-100 text-slate-700'}`}>
+                          {u.nivel_permissao}
                         </span>
-                      )}
-                    </td>
-                    <td className="p-4 text-slate-500">{u.email}</td>
-                    <td className="p-4 font-bold text-slate-700">{u.empresa || '-'}</td>
-                    <td className="p-4">
-                      <span className={`px-2 py-1 rounded text-xs font-black ${CORES_NIVEL[u.nivel_permissao] ?? 'bg-slate-100 text-slate-700'}`}>
-                        {u.nivel_permissao}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <span className={`px-3 py-1 rounded text-xs font-bold text-white ${CORES_STATUS[situacao] ?? 'bg-slate-400'}`}>
-                        {rotulo(situacao)}
-                      </span>
-                    </td>
-                    <td className="p-4 text-slate-500 text-xs font-bold">{formatarData(u.ultimo_login_em)}</td>
-                    <td className="p-4 text-right whitespace-nowrap flex justify-end gap-2">
-                      {situacao === 'pendente' && (
-                        <button
-                          onClick={() => aprovar(u)}
-                          className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:bg-emerald-50 px-2 py-1 rounded transition-colors"
-                          title="Aprovar solicitação de acesso"
-                        >
-                          <i className="fas fa-user-check"></i>
-                          Aprovar
-                        </button>
-                      )}
-                      <button
-                        onClick={() => gerarLink(u)}
-                        className="inline-flex items-center gap-1 text-xs font-bold text-amber-600 hover:bg-amber-50 px-2 py-1 rounded transition-colors"
-                        title="Gerar link de redefinição de senha"
-                      >
-                        <i className="fas fa-key"></i>
-                        Redefinir
-                      </button>
-                      <button
-                        onClick={() => abrirEdicao(u)}
-                        className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:bg-blue-50 px-2 py-1 rounded transition-colors"
-                        title="Editar usuário"
-                      >
-                        <i className="fas fa-pen"></i>
-                        Editar
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                      </td>
+                      <td className="p-4">
+                        <span className={`px-3 py-1 rounded text-xs font-bold text-white ${CORES_STATUS[situacao] ?? 'bg-slate-400'}`}>
+                          {rotulo(situacao)}
+                        </span>
+                      </td>
+                      <td className="p-4 text-slate-500 text-xs font-bold">{formatarData(u.ultimo_login_em)}</td>
+                      <td className="p-4 text-right">
+                        <div className="flex items-center justify-end gap-2 flex-wrap">
+                          {situacao === 'pendente' && (
+                            <button
+                              onClick={() => aprovar(u)}
+                              className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:bg-emerald-50 px-2 py-1 rounded transition-colors"
+                              title="Aprovar solicitação de acesso"
+                            >
+                              <i className="fas fa-user-check"></i>
+                              Aprovar
+                            </button>
+                          )}
+                          <button
+                            onClick={() => gerarLink(u)}
+                            className="inline-flex items-center gap-1 text-xs font-bold text-amber-600 hover:bg-amber-50 px-2 py-1 rounded transition-colors"
+                            title="Gerar link de redefinição de senha"
+                          >
+                            <i className="fas fa-key"></i>
+                            Redefinir
+                          </button>
+                          <button
+                            onClick={() => abrirEdicao(u)}
+                            className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:bg-blue-50 px-2 py-1 rounded transition-colors"
+                            title="Editar usuário"
+                          >
+                            <i className="fas fa-pen"></i>
+                            Editar
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {linkGerado && (
