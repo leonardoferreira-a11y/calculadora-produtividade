@@ -301,19 +301,22 @@ export default function ControleAcessos() {
                 onFocus={(e) => e.currentTarget.select()}
                 className="mt-4 w-full border border-slate-200 rounded-lg p-3 text-xs font-mono bg-slate-50 text-slate-700 break-all"
               />
-              <div className="mt-4 flex justify-end gap-3">
+              <div className="mt-6 flex justify-end gap-3 pt-4 border-t border-slate-200">
                 <button
                   onClick={() => {
-                    navigator.clipboard?.writeText(linkGerado.link);
-                    mostrarAvisoTela('Link copiado.', 'sucesso');
+                    navigator.clipboard?.writeText(linkGerado.link).then(() => {
+                      mostrarAvisoTela('Link copiado para a área de transferência!', 'sucesso');
+                    }).catch(() => {
+                      mostrarAvisoTela('Erro ao copiar. Tente selecionear e copiar manualmente.', 'erro');
+                    });
                   }}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-5 rounded-lg shadow-sm transition-all text-sm"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-md shadow-emerald-600/30 transition-all text-sm flex items-center gap-2"
                 >
-                  <i className="fas fa-copy mr-2"></i>Copiar
+                  <i className="fas fa-copy"></i>Copiar Link
                 </button>
                 <button
                   onClick={() => setLinkGerado(null)}
-                  className="bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold py-2.5 px-5 rounded-lg shadow-sm transition-all text-sm"
+                  className="bg-slate-100 border border-slate-300 text-slate-700 hover:bg-slate-200 font-bold py-2.5 px-6 rounded-lg shadow-sm transition-all text-sm"
                 >
                   Fechar
                 </button>
