@@ -73,12 +73,17 @@ export async function POST(request) {
     const resKitsTop = await pool.query(
       `SELECT kc.id_codigo_kit, kc.dados_calculo,
               pk.id_codigo_sku_capa, pk.filtro_producao AS kit_filtro,
-              pk.grafica AS kit_grafica
+              pk.grafica AS kit_grafica,
+              pc.sku_ref AS sku_miolo
        FROM kit_calculos kc
        JOIN prod_kits pk
          ON UPPER(TRIM(kc.id_codigo_kit)) = UPPER(TRIM(pk.id_codigo_kit))
         AND UPPER(TRIM(kc.filtro_producao)) = UPPER(TRIM(pk.filtro_producao))
         AND UPPER(TRIM(kc.grafica)) = UPPER(TRIM(pk.grafica))
+       LEFT JOIN prod_capas pc
+         ON UPPER(TRIM(pk.id_codigo_sku_capa)) = UPPER(TRIM(pc.sku_capa))
+        AND UPPER(TRIM(pk.filtro_producao)) = UPPER(TRIM(pc.filtro_producao))
+        AND UPPER(TRIM(pk.grafica)) = UPPER(TRIM(pc.grafica))
        WHERE UPPER(TRIM(kc.grafica)) = UPPER(TRIM($1))
          AND kc.dados_calculo IS NOT NULL`,
       [grafica]
@@ -95,6 +100,9 @@ export async function POST(request) {
 
         if (!mapaComponentesKit.has(key)) mapaComponentesKit.set(key, []);
         mapaComponentesKit.get(key).push(UPPER_CASE(r.id_codigo_sku_capa));
+        // O Kit é ligado ao seu SKU de Miolo via prod_capas.sku_ref (capa -> miolo),
+        // não pelo id_codigo_kit. Sem isso, o Kit nunca esperava a produção do Miolo.
+        if (r.sku_miolo) mapaComponentesKit.get(key).push(UPPER_CASE(r.sku_miolo));
 
         if (!kitsToGenerate.has(key)) {
             let dc = {};
@@ -113,14 +121,18 @@ export async function POST(request) {
 
     // Formatos aceitos: "HH:MM" ou "N dia(s) + HH:MM" (ex: "1 dia + 11:48")
     const horasDeString = (str) => {
-      if (!str) return 0;
-      const s = String(str);
+      if (!str) return 0.016; 
+      const s = String(str).trim();
       let horas = 0;
       const diaMatch = s.match(/(\d+)\s*dia/i);
       if (diaMatch) horas += parseInt(diaMatch[1]) * 24;
       const hmMatch = s.match(/(\d+):(\d+)/);
-      if (hmMatch) horas += parseInt(hmMatch[1]) + (parseInt(hmMatch[2]) / 60);
-      return horas;
+      if (hmMatch) {
+          horas += parseInt(hmMatch[1]) + (parseInt(hmMatch[2]) / 60);
+      } else if (!diaMatch && !isNaN(parseFloat(s))) {
+          horas += parseFloat(s);
+      }
+      return horas > 0 ? horas : 0.016; // Nunca retorna zero, impede a tarefa de sumir
     };
 
     // Injeta as tarefas de Kit Virtuais na Esteira Principal
@@ -221,26 +233,30 @@ export async function POST(request) {
     const indefinitasPorSku = new Map();
     const indefinitasById = new Map();
 
-    let indefinitas = resTarefas.rows.map(t => {
+    // Cola e Alceamento na mesma máquina são a MESMA passada física (linha PUR: alceia e cola
+    // em um único ciclo) — a calculadora reporta o mesmo total sob as duas chaves do JSON.
+    // Mantém a tarefa de Cola (tempo real) e descarta a duplicata de Alceamento, em vez de
+    // zerar o tempo de uma delas (isso escondia o tempo real calculado no gantt).
+    const resTarefasSemDuplicataAlceamento = resTarefas.rows.filter(t => {
+        const nomeE = String(t.nome_etapa).toLowerCase();
+        if (!nomeE.includes('alcead')) return true;
+        const duplicataDeCola = resTarefas.rows.some(other =>
+            String(other.sku_alvo).toUpperCase().trim() === String(t.sku_alvo).toUpperCase().trim() &&
+            String(other.nome_etapa).toLowerCase().includes('cola') &&
+            !String(other.nome_etapa).toLowerCase().includes('alcead') &&
+            String(other.maquina_id) === String(t.maquina_id)
+        );
+        return !duplicataDeCola;
+    });
+
+    let indefinitas = resTarefasSemDuplicataAlceamento.map(t => {
         const nomeE = String(t.nome_etapa).toLowerCase();
         const maqT = String(t.maq_tipo).toLowerCase();
         const maqM = String(t.maq_modelo).toLowerCase();
 
-        let tempoCorrigido = Number(t.tempo_estimado_horas);
-        if (nomeE.includes('cola') && !nomeE.includes('alcead')) {
-            const duplicataInline = resTarefas.rows.some(other =>
-                String(other.sku_alvo).toUpperCase().trim() === String(t.sku_alvo).toUpperCase().trim() &&
-                String(other.nome_etapa).toLowerCase().includes('alcead') &&
-                String(other.maquina_id) === String(t.maquina_id)
-            );
-            if (duplicataInline) {
-                tempoCorrigido = 0.016;
-            }
-        }
-
         return {
             ...t,
-            tempo_estimado_horas: tempoCorrigido,
+            tempo_estimado_horas: Number(t.tempo_estimado_horas),
             _skuUp: UPPER_CASE(t.sku_alvo),
             _idUp: UPPER_CASE(t.id),
             _depUp: t.id_dependencia ? UPPER_CASE(t.id_dependencia) : null,
@@ -477,38 +493,40 @@ export async function POST(request) {
                 let maxFimComponentes = tempoProntidaoTecnica;
                 let precisaCura = false;
 
+                let allCompIndef = [];
+                let allCompRes = [];
+
                 for (const compSku of componentes) {
                     const tarefasDoComp = resolvidasPorSku.get(compSku) || [];
                     const compIndef = indefinitasPorSku.get(compSku) || [];
 
-                    let cIndef = compIndef.filter(r => r.id !== t.id && !(t.nome_etapa === 'Shrink' && r.nome_etapa === 'Encaixotamento'));
-                    let cRes = tarefasDoComp.filter(r => r.id !== t.id && !(t.nome_etapa === 'Shrink' && r.nome_etapa === 'Encaixotamento'));
+                    // Ignora as tarefas virtuais de Kit (Shrink/Caixa) para não herdar delays
+                    let cIndef = compIndef.filter(r => r.id !== t.id && !r._isKit);
+                    let cRes = tarefasDoComp.filter(r => r.id !== t.id && !r._isKit);
 
                     let cIndefNoLote = cIndef.filter(r => GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo);
                     let cResNoLote = cRes.filter(r => GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo);
 
-                    // 🚨 FALLBACK: componente embutido, sem tarefa própria neste lote.
-                    // Espera a tarefa PAI desse componente (o Miolo/SKU alvo do próprio Kit
-                    // naquele lote) — nunca todo o lote, senão o Kit fica preso atrás de
-                    // SKUs não relacionados que podem levar semanas para terminar.
-                    if (cIndefNoLote.length === 0 && cResNoLote.length === 0) {
-                        cIndefNoLote = indefinitas.filter(r =>
-                            !r._isKit &&
-                            r._skuUp === t._skuUp &&
-                            GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo
-                        );
-                        cResNoLote = (resolvidasPorSku.get(t._skuUp) || []).filter(r =>
-                            !r._isKit &&
-                            GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo
-                        );
-                    }
+                    allCompIndef.push(...cIndefNoLote);
+                    allCompRes.push(...cResNoLote);
+                }
 
-                    if (cIndefNoLote.length > 0) {
-                        todosResolvidos = false;
-                        break;
-                    }
+                // FALLBACK: Só dispara se não existir NENHUMA tarefa física para NENHUM componente
+                if (allCompIndef.length === 0 && allCompRes.length === 0) {
+                    allCompIndef = indefinitas.filter(r =>
+                        !r._isKit &&
+                        GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo
+                    );
+                    allCompRes = Array.from(resolvidasMap.values()).filter(r =>
+                        !r._isKit &&
+                        GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo
+                    );
+                }
 
-                    for (const tc of cResNoLote) {
+                if (allCompIndef.length > 0) {
+                    todosResolvidos = false;
+                } else {
+                    for (const tc of allCompRes) {
                         const fim = new Date(tc.data_fim);
                         if (fim > maxFimComponentes) maxFimComponentes = fim;
                         if (tc._isPUR) precisaCura = true;
@@ -518,20 +536,19 @@ export async function POST(request) {
                 if (!todosResolvidos) {
                     prontoParaAgendar = false;
                 } else {
-                    if (precisaCura) {
+                    if (precisaCura && !pai) {
                         maxFimComponentes = new Date(maxFimComponentes.getTime() + (24 * 60 * 60 * 1000));
                     }
                     if (maxFimComponentes > tempoProntidaoTecnica) {
                         tempoProntidaoTecnica = maxFimComponentes;
                     }
-                    // Respeita o Pai Direto (Ex: Encaixotamento esperando o Shrink)
+                    // Respeita o Pai Direto (Ex: Encaixotamento cola imediatamente no final do Shrink)
                     if (pai && new Date(pai.data_fim) > tempoProntidaoTecnica) {
                         tempoProntidaoTecnica = new Date(pai.data_fim);
                     }
                 }
             }
         }
-
         if (pai && prontoParaAgendar && !t._isKit) { 
           if (pai._isPUR && t._isKit) delayCuraMs = 24 * 60 * 60 * 1000;
 

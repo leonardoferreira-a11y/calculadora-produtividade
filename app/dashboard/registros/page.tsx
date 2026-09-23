@@ -411,7 +411,8 @@ export default function RegistrosTempo() {
          if (filtradas.length > 0) candidatas = filtradas;
     }
 
-    if (grafica === 'MAXI') {
+    const nomeGrafica = String(grafica).trim().toUpperCase();
+    if (nomeGrafica === 'MAXI' || nomeGrafica === 'RONA') {
       return candidatas.sort((a, b) => {
         const cfg = (m: any) => { try { return typeof m.configuracoes === 'string' ? JSON.parse(m.configuracoes) : (m.configuracoes || {}); } catch(e) { return {}; } };
         return (Number(b.produtividade_unit || 0) * (Number(cfg(b).pgs_caderno) || 1)) - (Number(a.produtividade_unit || 0) * (Number(cfg(a).pgs_caderno) || 1));
@@ -431,6 +432,15 @@ export default function RegistrosTempo() {
       return ehImpressao && texto.includes(chave);
     });
     if (candidatas.length === 0) return null;
+
+    const nomeGrafica = String(grafica).trim().toUpperCase();
+    if (nomeGrafica === 'MAXI' || nomeGrafica === 'RONA') {
+      return candidatas.sort((a, b) => {
+        const cfg = (m: any) => { try { return typeof m.configuracoes === 'string' ? JSON.parse(m.configuracoes) : (m.configuracoes || {}); } catch(e) { return {}; } };
+        return (Number(b.produtividade_unit || 0) * (Number(cfg(b).pgs_caderno) || 1)) - (Number(a.produtividade_unit || 0) * (Number(cfg(a).pgs_caderno) || 1));
+      })[0];
+    }
+
     return candidatas.sort((a, b) => Number(b.produtividade_unit || 0) - Number(a.produtividade_unit || 0))[0];
   };
 
@@ -503,6 +513,51 @@ export default function RegistrosTempo() {
       if (maqEspecifica) return maqEspecifica; // PASSO D
     }
     return candidata;
+  };
+
+  const getMaquinaBeneficiamentoAdequada = (capas: any[], maquinaImpCapa?: any) => {
+    // 1. Identifica o que a capa pede de forma flexível
+    const precisaLaminacao = capas.some(c => {
+      const b = String(c.beneficiamento || '').toUpperCase();
+      return b.includes('LAMIN') || b.includes('LAMINAÇÃO') || b.includes('BOPP') || b.includes('LAMI');
+    });
+    const precisaVerniz = capas.some(c => {
+      const b = String(c.beneficiamento || '').toUpperCase();
+      return b.includes('VERNIZ') || b.includes('VERN');
+    });
+
+    const isStar7 = String(grafica).toUpperCase() === 'STAR7';
+    const isPlanaCd6 = maquinaImpCapa && String(maquinaImpCapa.modelo || '').toUpperCase().includes('PLANA CAPAS CD 6');
+
+    // 2. Regra de Exceção STAR7
+    if (isStar7 && isPlanaCd6 && precisaVerniz && !precisaLaminacao) {
+      return null; // A impressora já passa verniz, não alocar máquina de acabamento
+    }
+
+    // 3. Função de busca super flexível (olha Tipo, Modelo e Descrição)
+    const buscarMaquinaFlexivel = (palavrasChave: string[]) => {
+      const candidatas = maquinasCargadas.filter(m => {
+        const texto = `${m.tipo || ''} ${m.modelo || ''} ${m.descricao || ''}`.toUpperCase();
+        return palavrasChave.some(palavra => texto.includes(palavra));
+      });
+      if (candidatas.length === 0) return null;
+      // Retorna a mais rápida dentre as encontradas
+      return candidatas.sort((a, b) => Number(b.produtividade_unit || 0) - Number(a.produtividade_unit || 0))[0];
+    };
+
+    // 4. Aplica as buscas específicas
+    if (precisaLaminacao) {
+      const mqLam = buscarMaquinaFlexivel(['LAMIN', 'LAMI', 'LAMINAÇÃO', 'BOPP']);
+      if (mqLam) return mqLam;
+    }
+    
+    if (precisaVerniz) {
+      const mqVer = buscarMaquinaFlexivel(['VERNIZ', 'VERN']);
+      if (mqVer) return mqVer;
+    }
+
+    // 5. Fallback padrão se não encontrar palavra chave
+    return getMaquinaMaisRapida('Beneficiamento');
   };
 
   // ----------------------------------------------------------------------
@@ -984,9 +1039,11 @@ export default function RegistrosTempo() {
       const resImp = calcularImpressao(mqImp, Number(item.paginacao), Number(item.tiragem));
       const totalCadernos = resImp ? resImp.totais.qtd : 1;
 
+      const capasDoItem = capasDoLote.filter(c => String(c.sku_ref) === String(item.sku_miolo));
       const mqImpCapa = robo.impressaoCapa ? maquinasCargadas.find(m => String(m.id) === robo.impressaoCapa) : (getMaquinaDedicada('capa') || getMaquinaIdeal('Impressão', techCapa));
-      const mqBenCapa = robo.benefCapa ? maquinasCargadas.find(m => String(m.id) === robo.benefCapa) : getMaquinaMaisRapida('Beneficiamento');
+      const mqBenCapa = robo.benefCapa ? maquinasCargadas.find(m => String(m.id) === robo.benefCapa) : getMaquinaBeneficiamentoAdequada(capasDoItem, mqImpCapa);
       const mqEmpCapa = robo.empastCapa ? maquinasCargadas.find(m => String(m.id) === robo.empastCapa) : getMaquinaMaisRapida('Empastamento', 'Capa Dura');
+
       let mqDob = robo.dobra ? maquinasCargadas.find(m => String(m.id) === robo.dobra) : getMaquinaMaisRapida('Dobra');
       const acab = String(item.acabamento || '').toUpperCase();
 
@@ -1004,7 +1061,8 @@ export default function RegistrosTempo() {
       }
 
       const mqGra = robo.grampo ? maquinasCargadas.find(m => String(m.id) === robo.grampo) : getMaquinaComMenorFila('Grampo', 'Canoa');
-      const mqFur = robo.furacao ? maquinasCargadas.find(m => String(m.id) === robo.furacao) : getMaquinaMaisRapida('Furação', 'Espiral');
+      const isRona = String(grafica).toUpperCase() === 'RONA';
+      const mqFur = robo.furacao ? maquinasCargadas.find(m => String(m.id) === robo.furacao) : (isRona ? null : getMaquinaMaisRapida('Furação', 'Espiral'));
       
       const lombadaNum = Number(String(item.lombada || '0').replace(',', '.'));
       const mqEspFinal = robo.espiral
@@ -1020,7 +1078,6 @@ export default function RegistrosTempo() {
       const mqImpAde = robo.impressaoAdesivo ? maquinasCargadas.find(m => String(m.id) === robo.impressaoAdesivo) : getMaquinaIdeal('Impressão', techEncReal);
       const mqCorte = robo.corteVinco ? maquinasCargadas.find(m => String(m.id) === robo.corteVinco) : getMaquinaMaisRapida('Corte');
 
-      const capasDoItem = capasDoLote.filter(c => String(c.sku_ref) === String(item.sku_miolo));
       const resImpCapa = calcularImpressaoCapa(mqImpCapa, capasDoItem, Number(item.tiragem));
       
       const resBenCapa = calcularBeneficiamentoCapa(mqBenCapa, capasDoItem, Number(item.tiragem), mqImpCapa);
@@ -1865,7 +1922,9 @@ export default function RegistrosTempo() {
                         const mqImpCapRec = getMaquinaDedicada('capa') || getMaquinaIdeal('Impressão', techCapa);
                         const mqImpEncRec = getMaquinaDedicada('encarte') || mqImpRec;
 
-                        const mqBenRec = getMaquinaMaisRapida('Beneficiamento');
+                        const capasDesseItem = capasDoLote.filter(c => String(c.sku_ref) === String(u.sku_miolo));
+                        const mqBenRec = getMaquinaBeneficiamentoAdequada(capasDesseItem, mqImpCapRec);
+                        
                         const mqEmpRec = getMaquinaMaisRapida('Empastamento', 'Capa Dura');
                         const mqCorRec = getMaquinaMaisRapida('Corte');
                         const mqDobRec = getMaquinaMaisRapida('Dobra');
@@ -1877,10 +1936,11 @@ export default function RegistrosTempo() {
                         let mqAlcRec = getMaquinaAlceamentoIdeal(acab, cadernosClica);
 
                         const mqGraRec = getMaquinaMaisRapida('Grampo', 'Canoa');
-                        const mqFurRec = getMaquinaMaisRapida('Furação', 'Espiral');
+                        const isRonaRec = String(grafica).toUpperCase() === 'RONA';
+                        const mqFurRec = isRonaRec ? null : getMaquinaMaisRapida('Furação', 'Espiral');
                         
                         const mqEspRec = getMaquinaEspiralAdequada(lombNum, mqImpRec);
-
+                        
                         setIdMaquinaImpressao(temCalculo && src.impressao?.maquina_id ? String(src.impressao.maquina_id) : (mqImpRec ? String(mqImpRec.id) : ''));
                         setIdMaquinaImpressaoCapa(temCalculo && src.impressao_capa?.maquina_id ? String(src.impressao_capa.maquina_id) : (mqImpCapRec ? String(mqImpCapRec.id) : ''));
                         setIdMaquinaBeneficiamentoCapa(temCalculo && src.beneficiamento_capa?.maquina_id ? String(src.beneficiamento_capa.maquina_id) : (mqBenRec ? String(mqBenRec.id) : ''));

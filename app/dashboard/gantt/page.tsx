@@ -76,6 +76,7 @@ const MachineRow = memo(function MachineRow({
     const dtFim = new Date(tarefa._msFim).toLocaleString('pt-BR', { timeZone:'UTC', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
     const kitSkusList: string[] = dadosExtras.kit_skus || [];
     const kitSkusLine = kitSkusList.length > 0 ? `\n\n📦 ITENS DO KIT (${kitSkusList.length}):\n${kitSkusList.join(', ')}` : '';
+    const dtIdeal = dadosExtras.ideal_inicio || 'N/A';
     
     // Rastreador de Feriados/Travas que engoliram horas do bloco
     let horasFeriado = 0;
@@ -90,16 +91,14 @@ const MachineRow = memo(function MachineRow({
       );
       if (trava) {
         const cap = trava.status_operacional === 'INATIVO' ? 0 : Number(trava.horas_disponiveis);
-        horasFeriado += (24 - cap); // O impacto é o que deixou de trabalhar nas 24h
+        horasFeriado += (24 - cap);
         if (trava.motivo) nomesFeriados.add(trava.motivo);
       }
       varredorData.setUTCDate(varredorData.getUTCDate() + 1);
     }
     const textoFeriados = horasFeriado > 0 ? `\n🏖️ Impacto Parada/Feriado Especial: +${horasFeriado.toFixed(1)}h (${Array.from(nomesFeriados).join(', ')})` : '';
-    const dtIdeal = dadosExtras.ideal_inicio || 'N/A';
-    
-    const tooltipTexto = `📋 LOTE: ${tarefa.filtro_producao}\n🔖 SKU: ${tarefa.sku_alvo}\n⚙️ ETAPA: ${tarefa.nome_etapa}\n📦 Tiragem: ${dadosExtras.tiragem||'N/A'}\n📄 Paginação: ${dadosExtras.paginacao||'N/A'}\n🎨 Acabamento: ${dadosExtras.acabamento||'N/A'}${kitSkusLine}\n\n📅 DISPONIBILIDADE (Chegada/Arquivo): ${dtIdeal}\n\n⏱️ Duração Teórica Bruta: ${Number(tarefa.tempo_estimado_horas).toFixed(2)}h\n⏱️ Carga Ativa Ocupada: ${Number(tarefa.tempo_producao_efetivo).toFixed(2)}h\n\n🛑 Tempo Retido em Fila (Espera): ${Number(tarefa.tempo_espera_fila||0).toFixed(2)}h\n🛑 Horas Indisponíveis (Madrugadas / Regra): ${Number(tarefa.tempo_indisponivel_regra||0).toFixed(2)}h${textoFeriados}\n\n🟢 INÍCIO EFETIVO: ${dtInicio}\n🔴 FINAL OPERAÇÃO: ${dtFim}`;
-    
+
+    const tooltipTexto = `📋 LOTE: ${tarefa.filtro_producao}\n🔖 SKU: ${tarefa.sku_alvo}\n⚙️ ETAPA: ${tarefa.nome_etapa}\n📦 Tiragem: ${dadosExtras.tiragem||'N/A'}\n📄 Paginação: ${dadosExtras.paginacao||'N/A'}\n🎨 Acabamento: ${dadosExtras.acabamento||'N/A'}${kitSkusLine}\n\n📅 DISPONIBILIDADE (Chegada/Arquivo): ${dtIdeal}\n\n⏱️ Duração Teórica Bruta: ${Number(tarefa.tempo_estimado_horas).toFixed(2)}h\n⏱️ Carga Ativa Ocupada: ${Number(tarefa.tempo_producao_efetivo).toFixed(2)}h\n\n🛑 Tempo Retido em Fila (Espera): ${Number(tarefa.tempo_espera_fila||0).toFixed(2)}h\n🛑 Horas Indisponíveis (Madrugadas / Regra): ${Number(tarefa.tempo_indisponivel_regra||0).toFixed(2)}h${textoFeriados}\n\n🟢 INÍCIO EFETIVO: ${dtInicio}\n🔴 FINAL OPERAÇÃO: ${dtFim}`;    
     return { tarefa, left, width, widthNum, dTop, tooltipTexto };
   }), [tarefasDaMaquina, dataInicioAbsMs, ppd]);
 

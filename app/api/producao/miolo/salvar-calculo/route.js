@@ -115,6 +115,15 @@ export async function POST(request) {
       }
     }
 
+    // Cola e Alceamento na mesma máquina são a MESMA passada física (linha PUR alceia e cola
+    // em um único ciclo) — a calculadora reporta o mesmo total sob as duas chaves do JSON.
+    // Sem isso, o gantt agendava as duas como tarefas independentes, dobrando a ocupação
+    // real da máquina.
+    if (etapasSalvasNestaRodada['COLA'] && etapasSalvasNestaRodada['ALC'] &&
+        etapasSalvasNestaRodada['COLA'].maquina === etapasSalvasNestaRodada['ALC'].maquina) {
+      delete etapasSalvasNestaRodada['ALC'];
+    }
+
     // 🔴 2.2 DESMEMBRAMENTO DO NÓ MÚLTIPLO: ESPIRAL (Que contém Furação junto!)
     if (dados_calculo.espiral && dados_calculo.espiral.resultado) {
       const resEspir = dados_calculo.espiral.resultado.totais || {};
