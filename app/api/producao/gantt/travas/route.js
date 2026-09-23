@@ -38,3 +38,18 @@ export async function POST(request) {
     return NextResponse.json({ message: error.message }, { status: 500 });
   }
 }
+
+export async function DELETE(request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+
+    if (!id) return NextResponse.json({ message: "ID obrigatório" }, { status: 400 });
+
+    await pool.query(`DELETE FROM gantt_calendario_trava WHERE id = $1`, [id]);
+
+    return NextResponse.json({ message: "Trava removida com sucesso!" }, { status: 200 });
+  } catch (error) {
+    return NextResponse.json({ message: error.message }, { status: 500 });
+  }
+}

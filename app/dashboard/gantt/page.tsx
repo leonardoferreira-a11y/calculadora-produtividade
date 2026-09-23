@@ -10,7 +10,7 @@ function obterSetorPertencente(tipo: string, etapa: string): string {
   if (t.includes('empast') || e.includes('empast')) return 'Empastamento';
   if (t.includes('dobra') || e.includes('dobra')) return 'Dobra';
   if (t.includes('corte') || t.includes('vinco') || e.includes('corte')) return 'Corte e Vinco';
-  if (t.includes('shrink') || t.includes('encaixot') || e.includes('shrink') || e.includes('box') || t.includes('kit') || e.includes('kit')) return 'Formação de Kit';
+  if (t.includes('shrink') || t.includes('encaixot') || e.includes('shrink') || e.includes('encaixot') || e.includes('box') || t.includes('kit') || e.includes('kit')) return 'Formação de Kit';
   if (t.includes('alceade') || e.includes('alcead')) return 'Alceadeira';
   if (t.includes('cola') || e.includes('cola') || t.includes('pur') || e.includes('pur')) return 'Acabamentos Finais';
   return 'Acabamentos Finais';
@@ -76,7 +76,29 @@ const MachineRow = memo(function MachineRow({
     const dtFim = new Date(tarefa._msFim).toLocaleString('pt-BR', { timeZone:'UTC', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
     const kitSkusList: string[] = dadosExtras.kit_skus || [];
     const kitSkusLine = kitSkusList.length > 0 ? `\n\n📦 ITENS DO KIT (${kitSkusList.length}):\n${kitSkusList.join(', ')}` : '';
-    const tooltipTexto = `📋 LOTE: ${tarefa.filtro_producao}\n🔖 SKU: ${tarefa.sku_alvo}\n⚙️ ETAPA: ${tarefa.nome_etapa}\n📦 Tiragem: ${dadosExtras.tiragem||'N/A'}\n📄 Paginação: ${dadosExtras.paginacao||'N/A'}\n🎨 Acabamento: ${dadosExtras.acabamento||'N/A'}${kitSkusLine}\n\n⏱️ Duração Teórica Bruta: ${Number(tarefa.tempo_estimado_horas).toFixed(2)}h\n⏱️ Carga Ativa Ocupada: ${Number(tarefa.tempo_producao_efetivo).toFixed(2)}h\n\n🛑 Tempo Retido em Fila (Espera): ${Number(tarefa.tempo_espera_fila||0).toFixed(2)}h\n🛑 Horas Indisponíveis (Madrugadas / Regra): ${Number(tarefa.tempo_indisponivel_regra||0).toFixed(2)}h\n\n🟢 INÍCIO EFETIVO: ${dtInicio}\n🔴 FINAL OPERAÇÃO: ${dtFim}`;
+    const dtIdeal = dadosExtras.ideal_inicio || 'N/A';
+    
+    // Rastreador de Feriados/Travas que engoliram horas do bloco
+    let horasFeriado = 0;
+    let nomesFeriados = new Set<string>();
+    let varredorData = new Date(tarefa._msInicio);
+    varredorData.setUTCHours(0,0,0,0);
+    while (varredorData.getTime() <= tarefa._msFim) {
+      const dStr = varredorData.toISOString().split('T')[0];
+      const trava = travasCalendario.find((tv: any) => 
+        (String(tv.maquina_id) === String(tarefa.maquina_id) || tv.maquina_id === 'TODAS') &&
+        String(tv.data_alvo).startsWith(dStr)
+      );
+      if (trava) {
+        const cap = trava.status_operacional === 'INATIVO' ? 0 : Number(trava.horas_disponiveis);
+        horasFeriado += (24 - cap);
+        if (trava.motivo) nomesFeriados.add(trava.motivo);
+      }
+      varredorData.setUTCDate(varredorData.getUTCDate() + 1);
+    }
+    const textoFeriados = horasFeriado > 0 ? `\n🏖️ Impacto Parada/Feriado Especial: +${horasFeriado.toFixed(1)}h (${Array.from(nomesFeriados).join(', ')})` : '';
+
+    const tooltipTexto = `📋 LOTE: ${tarefa.filtro_producao}\n🔖 SKU: ${tarefa.sku_alvo}\n⚙️ ETAPA: ${tarefa.nome_etapa}\n📦 Tiragem: ${dadosExtras.tiragem||'N/A'}\n📄 Paginação: ${dadosExtras.paginacao||'N/A'}\n🎨 Acabamento: ${dadosExtras.acabamento||'N/A'}${kitSkusLine}\n\n📅 DISPONIBILIDADE (Chegada/Arquivo): ${dtIdeal}\n\n⏱️ Duração Teórica Bruta: ${Number(tarefa.tempo_estimado_horas).toFixed(2)}h\n⏱️ Carga Ativa Ocupada: ${Number(tarefa.tempo_producao_efetivo).toFixed(2)}h\n\n🛑 Tempo Retido em Fila (Espera): ${Number(tarefa.tempo_espera_fila||0).toFixed(2)}h\n🛑 Horas Indisponíveis (Madrugadas / Regra): ${Number(tarefa.tempo_indisponivel_regra||0).toFixed(2)}h${textoFeriados}\n\n🟢 INÍCIO EFETIVO: ${dtInicio}\n🔴 FINAL OPERAÇÃO: ${dtFim}`;    
     return { tarefa, left, width, widthNum, dTop, tooltipTexto };
   }), [tarefasDaMaquina, dataInicioAbsMs, ppd]);
 
@@ -142,7 +164,8 @@ export default function GanttIndustrial() {
   const [diasMassa, setDiasMassa] = useState(5);
   const [horasMassa, setHorasMassa] = useState('24.00');
   const [maquinaTrava, setMaquinaTrava] = useState('');
-  const [dataAlvoTrava, setDataAlvoTrava] = useState('');
+  const [dataInicioTrava, setDataInicioTrava] = useState('');
+  const [dataFimTrava, setDataFimTrava] = useState('');
   const [statusOperacional, setStatusOperacional] = useState('INATIVO');
   const [horasDisponiveis, setHorasDisponiveis] = useState('0.00');
   const [motivoTrava, setMotivoTrava] = useState('');
@@ -157,6 +180,8 @@ export default function GanttIndustrial() {
   const [impactoToast, setImpactoToast] = useState<string | null>(null);
   const [fasesOverrides, setFasesOverrides] = useState<Record<string, string>>({});
   const [kitComponentesDestacados, setKitComponentesDestacados] = useState<Set<string>>(new Set());
+  const [travaParaRemover, setTravaParaRemover] = useState<string | null>(null);
+
 
   const setoresFixos = ['Impressão', 'Beneficiamento', 'Empastamento', 'Dobra', 'Corte e Vinco', 'Alceadeira', 'Acabamentos Finais', 'Formação de Kit'];
   const PALETA_LOTES = ["bg-blue-500 border-blue-700", "bg-emerald-500 border-emerald-700", "bg-rose-500 border-rose-700", "bg-amber-500 border-amber-700", "bg-purple-500 border-purple-700", "bg-sky-500 border-sky-700", "bg-fuchsia-500 border-fuchsia-700", "bg-lime-500 border-lime-700", "bg-orange-500 border-orange-700"];
@@ -312,9 +337,51 @@ export default function GanttIndustrial() {
 
   const handleAdicionarTrava = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!dataInicioTrava || !dataFimTrava) return;
+    setIsLoading(true);
+    setLoadingMsg('Gravando indisponibilidade no calendário...');
+    
     try {
-      const res = await fetch('/api/producao/gantt/travas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grafica: graficaSelecionada, maquina_id: maquinaTrava, data_alvo: dataAlvoTrava, status_operacional: statusOperacional, horas_disponiveis: parseFloat(horasDisponiveis || '0'), motivo: motivoTrava }) });
-      if (res.ok) { setMotivoTrava(''); abrirGanttDaGrafica(graficaSelecionada); }
+      const dataAtual = new Date(dataInicioTrava);
+      dataAtual.setUTCHours(0, 0, 0, 0);
+      const dataFinal = new Date(dataFimTrava);
+      dataFinal.setUTCHours(0, 0, 0, 0);
+
+      const promises = [];
+      while (dataAtual <= dataFinal) {
+        const dataStr = dataAtual.toISOString().split('T')[0];
+        promises.push(
+          fetch('/api/producao/gantt/travas', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ 
+              grafica: graficaSelecionada, 
+              maquina_id: maquinaTrava, 
+              data_alvo: dataStr, 
+              status_operacional: statusOperacional, 
+              horas_disponiveis: parseFloat(horasDisponiveis || '0'), 
+              motivo: motivoTrava 
+            }) 
+          })
+        );
+        dataAtual.setUTCDate(dataAtual.getUTCDate() + 1);
+      }
+
+      await Promise.all(promises);
+      setMotivoTrava('');
+      abrirGanttDaGrafica(graficaSelecionada); 
+    } catch (err) {}
+    setIsLoading(false);
+  };
+
+  const handleConfirmarRemocao = async () => {
+    if (!travaParaRemover) return;
+    try {
+      const res = await fetch(`/api/producao/gantt/travas?id=${travaParaRemover}`, { method: 'DELETE' });
+      if (res.ok) {
+        setTravaParaRemover(null); // Fecha o modal
+        abrirGanttDaGrafica(graficaSelecionada); // Recalcula
+      }
     } catch (err) {}
   };
 
@@ -341,7 +408,8 @@ export default function GanttIndustrial() {
 
   const handleDoubleClickCell = useCallback((mqId: string, dateStr: string) => {
     setMaquinaTrava(mqId);
-    setDataAlvoTrava(dateStr);
+    setDataInicioTrava(dateStr || '');
+    setDataFimTrava(dateStr || '');
     setStatusOperacional('INATIVO');
     setHorasDisponiveis('0.00');
     setMotivoTrava('');
@@ -401,18 +469,31 @@ export default function GanttIndustrial() {
     }));
   }, [tarefasGlobais, appliedLotesOcultos, buscaSkuQuery]);
 
+  // Setor de cada máquina: usa a etapa de uma tarefa real dela (se houver) em vez de
+  // adivinhar apenas pelo campo `tipo` da máquina — evita que uma tarefa (ex: Encaixotamento)
+  // fique sem linha visível quando o `tipo` da máquina no banco não contém uma palavra-chave reconhecida.
+  const setorPorMaquina = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const mq of maquinas) {
+      const mqId = String(mq.id).trim();
+      const tarefaQualquer = tarefasFiltradas.find(t => String(t.maquina_id).trim() === mqId);
+      map.set(mqId, obterSetorPertencente(mq.tipo, tarefaQualquer?.nome_etapa || ''));
+    }
+    return map;
+  }, [maquinas, tarefasFiltradas]);
+
   // Pre-grouped tasks per machine+sector — stable prop for MachineRow memo
   const tarefasPorMaquinaSetor = useMemo(() => {
     const map = new Map<string, any[]>();
     for (const mq of maquinas) {
-      const setor = obterSetorPertencente(mq.tipo, '');
       const mqId = String(mq.id).trim();
+      const setor = setorPorMaquina.get(mqId) || obterSetorPertencente(mq.tipo, '');
       map.set(`${setor}::${mqId}`, tarefasFiltradas.filter(t =>
         String(t.maquina_id).trim() === mqId && obterSetorPertencente(t.maq_tipo, t.nome_etapa) === setor
       ));
     }
     return map;
-  }, [maquinas, tarefasFiltradas]);
+  }, [maquinas, tarefasFiltradas, setorPorMaquina]);
 
   const Rulers = useMemo(() => {
     const ppd = visao === 'DIAS' ? zoomPixelsPorDia : visao === 'SEMANAS' ? (zoomPixelsPorDia / 7) : (zoomPixelsPorDia / 30);
@@ -545,6 +626,8 @@ export default function GanttIndustrial() {
       const m = String(d.getUTCMinutes()).padStart(2, '0');
       return `${dia}/${mes}/${ano} ${h}:${m}`;
     };
+
+    
 
     // 4. Juntar as peças: Linha do SKU + Tempo de Kit do respectivo Lote
     return Object.entries(skusObj).map(([sku, dados]) => {
@@ -686,7 +769,16 @@ export default function GanttIndustrial() {
               )}
               {(skuDestacado || kitComponentesDestacados.size > 0) && <button onClick={() => { setSkuDestacado(null); setKitComponentesDestacados(new Set()); }} className="bg-amber-500 text-slate-900 font-bold px-2 py-1.5 rounded-lg text-[10px] uppercase shadow">Limpar SKU</button>}
               <button onClick={() => setShowModalRelatorio(true)} className="bg-teal-600 hover:bg-teal-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs shadow-sm"><i className="fas fa-file-alt mr-1"></i> Prazos</button>
-              <button onClick={() => setShowModalTravas(true)} className="bg-violet-600 hover:bg-violet-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs shadow-sm"><i className="fas fa-calendar-alt mr-1"></i> Calendário</button>
+              <button onClick={() => {
+                setMaquinaTrava('TODAS');
+                setDataInicioTrava('');
+                setDataFimTrava('');;
+                setStatusOperacional('INATIVO');
+                setHorasDisponiveis('0.00');
+                setMotivoTrava('');
+                setAbaAtiva('TRAVAS');
+                setShowModalTravas(true);
+               }} className="bg-violet-600 hover:bg-violet-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs shadow-sm"><i className="fas fa-calendar-alt mr-1"></i> Calendário</button>
               <div className="flex items-center gap-2 bg-slate-700 p-1.5 rounded-lg"><span className="text-[10px] text-slate-300 font-bold uppercase">Zoom:</span><input type="range" min="60" max="800" value={zoomPixelsPorDia} onChange={(e) => setZoomPixelsPorDia(Number(e.target.value))} className="w-24 accent-violet-500 cursor-pointer" /></div>
               <button onClick={() => { setSkuDestacado(null); setEtapa(1); }} className="bg-slate-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs border border-slate-600 hover:bg-slate-600">Voltar</button>
             </div>
@@ -698,7 +790,7 @@ export default function GanttIndustrial() {
                 <div className="h-[74px] bg-slate-200 border-b flex items-center px-4 font-bold text-xs uppercase text-slate-600 sticky top-0 left-0 z-50">Equipamentos</div>
                 <div className="flex-1">
                   {setoresFixos.map(setor => {
-                    const maqSetor = maquinas.filter(m => obterSetorPertencente(m.tipo, '') === setor);
+                    const maqSetor = maquinas.filter(m => (setorPorMaquina.get(String(m.id).trim()) || obterSetorPertencente(m.tipo, '')) === setor);
                     if (maqSetor.length === 0) return null;
                     return (
                       <div key={setor}>
@@ -744,7 +836,7 @@ export default function GanttIndustrial() {
 
                 <div className="relative w-max min-w-full z-10">
                   {setoresFixos.map(setor => {
-                    const maqSetor = maquinas.filter(m => obterSetorPertencente(m.tipo, '') === setor);
+                    const maqSetor = maquinas.filter(m => (setorPorMaquina.get(String(m.id).trim()) || obterSetorPertencente(m.tipo, '')) === setor);
                     if (maqSetor.length === 0) return null;
                     return (
                       <div key={`grid-${setor}`}>
@@ -942,10 +1034,14 @@ export default function GanttIndustrial() {
             {abaAtiva === 'TRAVAS' && (
               <div className="flex-1 flex flex-col overflow-hidden">
                 <form onSubmit={handleAdicionarTrava} className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col gap-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Equipamento Alvo</label><select value={maquinaTrava} onChange={(e) => setMaquinaTrava(e.target.value)} className="w-full text-xs p-2 border border-slate-200 rounded-lg font-bold bg-white text-slate-800">{maquinas.map(m => <option key={m.id} value={m.id}>{m.modelo}</option>)}</select></div>
-                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Data Alvo</label><input type="date" required value={dataAlvoTrava} onChange={(e) => setDataAlvoTrava(e.target.value)} className="w-full text-xs p-2 border border-slate-200 rounded-lg bg-white text-slate-800" /></div>
+                  
+                  <div className="grid grid-cols-3 gap-3">
+                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Equipamento</label><select value={maquinaTrava} onChange={(e) => setMaquinaTrava(e.target.value)} className="w-full text-xs p-2 border border-slate-200 rounded-lg font-bold bg-white text-slate-800"><option value="TODAS">🌟 TODAS (Global)</option>{maquinas.map(m => <option key={m.id} value={m.id}>{m.modelo}</option>)}</select></div>
+                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Data Início</label><input type="date" required value={dataInicioTrava} onChange={(e) => setDataInicioTrava(e.target.value)} className="w-full text-xs p-2 border border-slate-200 rounded-lg bg-white text-slate-800" /></div>
+                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Data Fim</label><input type="date" required value={dataFimTrava} onChange={(e) => setDataFimTrava(e.target.value)} className="w-full text-xs p-2 border border-slate-200 rounded-lg bg-white text-slate-800" /></div>
                   </div>
+
+
                   <div className="grid grid-cols-3 gap-3">
                     <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Status</label><select value={statusOperacional} onChange={(e) => setStatusOperacional(e.target.value)} className="w-full text-xs p-2 border border-slate-200 rounded-lg bg-white font-bold text-slate-800"><option value="INATIVO">INATIVO (0h)</option><option value="PARCIAL">PARCIAL</option></select></div>
                     <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Horas Úteis</label><input type="number" step="0.25" min="0" max="24" required value={horasDisponiveis} onChange={(e) => setHorasDisponiveis(e.target.value)} className="w-full text-xs p-2 border border-slate-200 rounded-lg bg-white text-violet-700 font-bold" /></div>
@@ -953,7 +1049,26 @@ export default function GanttIndustrial() {
                   </div>
                   <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg text-xs uppercase shadow-sm transition-all">Gravar Indisponibilidade</button>
                 </form>
-                <div className="flex-1 overflow-auto p-4"><div className="divide-y divide-slate-100 border border-slate-200 rounded-lg text-xs shadow-sm">{travasCalendario.map((t, idx) => (<div key={idx} className="p-3 bg-white flex justify-between items-center"><div><span className="font-bold text-slate-800">Dia Alvo: {new Date(t.data_alvo).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</span><br/><span className="text-slate-400 font-mono text-[10px] mt-0.5">MÁQ: {t.maquina_id} · Obs: {t.motivo}</span></div><span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-mono font-bold border border-slate-200 uppercase">{t.status_operacional} ({t.horas_disponiveis}h)</span></div>))}</div></div>
+                <div className="flex-1 overflow-auto p-4">
+                  <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg text-xs shadow-sm">
+                    {travasCalendario.map((t, idx) => (
+                      <div key={idx} className="p-3 bg-white flex justify-between items-center group">
+                        <div>
+                          <span className="font-bold text-slate-800">Dia Alvo: {new Date(t.data_alvo).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</span><br/>
+                          <span className="text-slate-400 font-mono text-[10px] mt-0.5">MÁQ: {t.maquina_id} · Obs: {t.motivo}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-mono font-bold border border-slate-200 uppercase">{t.status_operacional} ({t.horas_disponiveis}h)</span>
+                          <button type="button" onClick={() => setTravaParaRemover(t.id)} className="text-red-500 hover:text-red-700 opacity-50 group-hover:opacity-100 transition-opacity cursor-pointer" title="Remover">
+                            <i className="fas fa-trash"></i>
+                          </button>
+                          
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
               </div>
             )}
             {abaAtiva === 'REGIME' && (
@@ -988,9 +1103,26 @@ export default function GanttIndustrial() {
                 </div>
               </div>
             )}
+          {/* MODAL DE CONFIRMAÇÃO DE REMOÇÃO DE TRAVA */}
+                {travaParaRemover && (
+                  <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full animate-in zoom-in-95 duration-200 border border-slate-200">
+                      <div className="flex items-center justify-center w-12 h-12 rounded-full bg-red-100 text-red-600 mb-4 mx-auto">
+                        <i className="fas fa-exclamation-triangle text-xl"></i>
+                      </div>
+                      <h3 className="text-lg font-black text-slate-800 text-center mb-2 uppercase tracking-tight">Remover Trava?</h3>
+                      <p className="text-xs text-slate-500 text-center mb-6">Esta ação apagará a indisponibilidade e o tempo voltará a ficar livre para o cálculo do Gantt. Deseja continuar?</p>
+                      <div className="flex gap-3">
+                        <button onClick={() => setTravaParaRemover(null)} className="flex-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 font-bold py-2 rounded-lg transition-colors text-xs uppercase">Cancelar</button>
+                        <button onClick={handleConfirmarRemocao} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-lg transition-colors text-xs uppercase shadow-md shadow-red-600/20">Sim, Remover</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
           </div>
         </div>
       )}
+      
     </div>
   );
 }

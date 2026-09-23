@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/leonardo.ferreira/AppData/Local/GitHubDesktop/**)",
+      "PowerShell($gitPath = \"C:\\\\Users\\\\leonardo.ferreira\\\\AppData\\\\Local\\\\GitHubDesktop\\\\app-3.5.11\\\\resources\\\\app\\\\git\\\\cmd\\\\git.exe\"; cd \"C:\\\\Users\\\\leonardo.ferreira\\\\Documents\\\\GitHub\\\\calculadora-produtividade\"; & $gitPath status)",
+      "PowerShell($gitPath = \"C:\\\\Users\\\\leonardo.ferreira\\\\AppData\\\\Local\\\\GitHubDesktop\\\\app-3.5.11\\\\resources\\\\app\\\\git\\\\cmd\\\\git.exe\"; cd 'C:\\\\Users\\\\leonardo.ferreira\\\\Documents\\\\GitHub\\\\calculadora-produtividade'; & $gitPath push)",
+      "PowerShell(Test-Path \"node_modules/next/dist/docs\"; Test-Path \"node_modules/next/package.json\"; if \\(Test-Path \"node_modules/next/package.json\"\\) { \\(Get-Content \"node_modules/next/package.json\" -Raw | ConvertFrom-Json\\).version })",
+      "PowerShell(node --check \"app\\\\api\\\\producao\\\\gantt\\\\route.js\")",
+      "PowerShell($gitPath = \"C:\\\\Program Files\\\\GitHub Desktop\\\\resources\\\\app\\\\git\\\\cmd\\\\git.exe\" ; if \\(Test-Path $gitPath\\) { Write-Host \"Found: $gitPath\" } else { Write-Host \"Not found at expected path, searching...\" ; Get-ChildItem -Path \"C:\\\\Program Files\\\\GitHub Desktop\" -Filter \"git.exe\" -Recurse 2>$null | Select-Object -First 1 })",
+      "PowerShell(& \"C:\\\\Program Files\\\\GitHub Desktop\\\\resources\\\\app\\\\git\\\\mingw64\\\\bin\\\\git.exe\" status)",
+      "PowerShell(head -20)",
+      "PowerShell(gh --version 2>&1)"
+    ]
+  }
+}
