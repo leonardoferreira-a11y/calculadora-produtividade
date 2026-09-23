@@ -1,49 +1,81 @@
-import pool from '@/lib/db';
 import { NextResponse } from 'next/server';
 
-// Força o Next.js a nunca usar memória cache para essa rota (Atualiza na hora)
+import { query, queryUma } from '@/lib/db';
+import { NIVEIS, STATUS } from '@/lib/auth-constants';
+import { exigirAdminApi } from '@/lib/auth-api';
+import { registrarAuditoria, normalizarEmail } from '@/lib/auth';
+import { gerarHashSenha, validarForcaSenha } from '@/lib/passwords';
+
+// Força o Next.js a nunca usar memória cache para essa rota (atualiza na hora)
 export const dynamic = 'force-dynamic';
 
+const NIVEIS_VALIDOS = Object.values(NIVEIS);
+const STATUS_VALIDOS = Object.values(STATUS);
+
 export async function GET() {
+  const { recusa } = await exigirAdminApi();
+  if (recusa) return recusa;
+
   try {
-    // 👇 OLHA A MÁGICA AQUI: Adicionamos a palavra "senha" no SELECT
-    const result = await pool.query('SELECT id, nome, email, senha, empresa, nivel_permissao, status FROM usuarios ORDER BY id ASC');
+    // A senha NUNCA sai daqui — depois da migração para bcrypt ela é irrecuperável.
+    // `senha_definida` diz apenas se a conta já tem senha utilizável.
+    const result = await query(
+      `SELECT id, nome, email, empresa, nivel_permissao, status, ultimo_login_em,
+              (senha_hash IS NOT NULL OR senha IS NOT NULL) AS senha_definida
+         FROM usuarios
+        ORDER BY id ASC`
+    );
     return NextResponse.json(result.rows, { status: 200 });
   } catch (error) {
-    console.error("Erro na API de buscar usuários:", error);
-    return NextResponse.json({ message: "Erro ao buscar usuários." }, { status: 500 });
+    console.error('Erro na API de buscar usuários:', error);
+    return NextResponse.json({ message: 'Erro ao buscar usuários.' }, { status: 500 });
   }
 }
 
 export async function POST(request) {
-  try {
-    const { nome, email, senha, empresa, nivel_permissao, status } = await request.json();
-    
-    await pool.query(
-      'INSERT INTO usuarios (nome, email, senha, empresa, nivel_permissao, status) VALUES ($1, $2, $3, $4, $5, $6)',
-      [nome, email, senha, empresa, nivel_permissao, status || 'Ativo']
-    );
-    return NextResponse.json({ message: "Usuário criado com sucesso!" }, { status: 201 });
-  } catch (error) {
-    console.error("Erro na API de criar usuário:", error);
-    return NextResponse.json({ message: "Erro ao criar usuário." }, { status: 500 });
-  }
-}
+  const { usuario: admin, recusa } = await exigirAdminApi();
+  if (recusa) return recusa;
 
-export async function PUT(request, { params }) {
   try {
-    const { id } = params;
     const { nome, email, senha, empresa, nivel_permissao, status } = await request.json();
-    
-    // Atualiza todos os dados, incluindo a senha que veio da tela
-    await pool.query(
-      'UPDATE usuarios SET nome = $1, email = $2, senha = $3, empresa = $4, nivel_permissao = $5, status = $6 WHERE id = $7',
-      [nome, email, senha, empresa, nivel_permissao, status, id]
+
+    const emailNormalizado = normalizarEmail(email);
+    if (!nome || !emailNormalizado) {
+      return NextResponse.json({ message: 'Nome e e-mail são obrigatórios.' }, { status: 400 });
+    }
+
+    const problemas = validarForcaSenha(senha);
+    if (problemas.length > 0) {
+      return NextResponse.json({ message: problemas.join(' ') }, { status: 400 });
+    }
+
+    const nivel = NIVEIS_VALIDOS.includes(nivel_permissao) ? nivel_permissao : NIVEIS.USER_GRAFICA;
+    const situacao = STATUS_VALIDOS.includes(status) ? status : STATUS.ATIVO;
+
+    const jaExiste = await queryUma('SELECT id FROM usuarios WHERE LOWER(TRIM(email)) = $1', [
+      emailNormalizado,
+    ]);
+    if (jaExiste) {
+      return NextResponse.json({ message: 'Já existe um usuário com este e-mail.' }, { status: 409 });
+    }
+
+    const novo = await queryUma(
+      `INSERT INTO usuarios (nome, email, senha_hash, empresa, nivel_permissao, status)
+            VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id`,
+      [nome, emailNormalizado, await gerarHashSenha(senha), empresa || null, nivel, situacao]
     );
-    
-    return NextResponse.json({ message: "Usuário atualizado com sucesso!" }, { status: 200 });
+
+    await registrarAuditoria({
+      autorId: admin.id,
+      alvoId: novo.id,
+      acao: 'USUARIO_CRIADO',
+      detalhe: `${emailNormalizado} criado como ${nivel} (${situacao})`,
+    });
+
+    return NextResponse.json({ message: 'Usuário criado com sucesso!' }, { status: 201 });
   } catch (error) {
-    console.error("Erro na API de atualizar usuário:", error);
-    return NextResponse.json({ message: "Erro ao atualizar usuário." }, { status: 500 });
+    console.error('Erro na API de criar usuário:', error);
+    return NextResponse.json({ message: 'Erro ao criar usuário.' }, { status: 500 });
   }
 }
