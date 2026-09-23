@@ -66,8 +66,131 @@ export async function POST(request) {
     const travasBD = resTravas.rows;
     const tarefasResolvidas = [];
     const controleMaquinasFim = {}; 
-    const ultimaAtividadeMaquina = {}; // 🔴 MEMÓRIA: Guarda a hora do último término de cada máquina
+    const ultimaAtividadeMaquina = {}; 
     const UPPER_CASE = (str) => String(str || '').toUpperCase().trim();
+
+    // 🔴 GERADOR DE KITS: Busca e injeta na fila principal ANTES do cálculo!
+    const resKitsTop = await pool.query(
+      `SELECT kc.id_codigo_kit, kc.dados_calculo,
+              pk.id_codigo_sku_capa, pk.filtro_producao AS kit_filtro,
+              pk.grafica AS kit_grafica
+       FROM kit_calculos kc
+       JOIN prod_kits pk
+         ON UPPER(TRIM(kc.id_codigo_kit)) = UPPER(TRIM(pk.id_codigo_kit))
+        AND UPPER(TRIM(kc.filtro_producao)) = UPPER(TRIM(pk.filtro_producao))
+        AND UPPER(TRIM(kc.grafica)) = UPPER(TRIM(pk.grafica))
+       WHERE UPPER(TRIM(kc.grafica)) = UPPER(TRIM($1))
+         AND kc.dados_calculo IS NOT NULL`,
+      [grafica]
+    );
+
+    const mapaComponentesKit = new Map(); // key: "${KIT_SKU_UPPER}_${FILTRO_UPPER}"
+    const kitsToGenerate = new Map();
+    const kitIdMap = new Map(); // Mapeia ID_CODIGO_KIT -> ID_CODIGO_KIT (normalizado)
+
+    resKitsTop.rows.forEach(r => {
+        const kitIdNormal = UPPER_CASE(r.id_codigo_kit);
+        const kitFiltroNormal = UPPER_CASE(r.kit_filtro);
+        const key = `${kitIdNormal}_${kitFiltroNormal}`;
+
+        if (!mapaComponentesKit.has(key)) mapaComponentesKit.set(key, []);
+        mapaComponentesKit.get(key).push(UPPER_CASE(r.id_codigo_sku_capa));
+
+        if (!kitsToGenerate.has(key)) {
+            let dc = {};
+            try { dc = typeof r.dados_calculo === 'string' ? JSON.parse(r.dados_calculo) : (r.dados_calculo || {}); } catch(e) {}
+            kitsToGenerate.set(key, {
+                id: r.id_codigo_kit,
+                id_norm: kitIdNormal,
+                filtro: r.kit_filtro,
+                filtro_norm: kitFiltroNormal,
+                grafica: r.kit_grafica,
+                dc,
+                skus: mapaComponentesKit.get(key)
+            });
+        }
+    });
+
+    const horasDeString = (str) => {
+      if (!str || !String(str).includes(':')) return 0;
+      const [h, m] = String(str).split(':');
+      return parseInt(h) + (parseInt(m) / 60);
+    };
+
+    // Injeta as tarefas de Kit Virtuais na Esteira Principal
+    for (const [, kit] of kitsToGenerate) {
+        const dc = kit.dc;
+        let shrinkId = null;
+
+        if (dc.shrink?.maquina_id && dc.shrink?.resultado) {
+            const horas = horasDeString(dc.shrink.resultado.totais?.total);
+            if (horas > 0) {
+                const filtroSanitizado = String(kit.filtro_norm || 'S/ LOTE').replace(/[^a-zA-Z0-9_-]/g, '_');
+                shrinkId = `kit-${kit.id_norm}-${filtroSanitizado}-Shrink`;
+                const mqData = maquinasReais.find(m => String(m.id) === String(dc.shrink.maquina_id)) || {};
+                resTarefas.rows.push({
+                    id: shrinkId,
+                    sku_alvo: kit.id_norm,
+                    filtro_producao: kit.filtro_norm || 'S/ LOTE',
+                    grafica: kit.grafica,
+                    nome_etapa: 'Shrink',
+                    maquina_id: String(dc.shrink.maquina_id),
+                    tempo_estimado_horas: horas,
+                    id_dependencia: null,
+                    status_tarefa: 'Pendente',
+                    maq_tipo: mqData.tipo || 'Shrink',
+                    maq_modelo: mqData.modelo || 'Shrink',
+                    dias_trabalho: mqData.dias_trabalho || 5,
+                    horas_diarias: mqData.horas_diarias || 24,
+                    total_maquinas_parque: mqData.maquinas || 1,
+                    total_pessoas_parque: mqData.pessoas || 1,
+                    fases_overrides: '{}',
+                    pm_tiragem: 'Kit',
+                    pm_paginacao: 'Kit',
+                    pm_acabamento: 'Shrink',
+                    ideal_inicio: new Date().toISOString(),
+                    kit_skus_custom: kit.skus,
+                    kit_filtro_original: kit.filtro_norm,
+                    _isVirtual: true,
+                    _isKit: true
+                });
+            }
+        }
+
+        if (dc.encaixotamento?.maquina_id && dc.encaixotamento?.resultado) {
+            const horas = horasDeString(dc.encaixotamento.resultado.totais?.total);
+            if (horas > 0) {
+                const filtroSanitizado = String(kit.filtro_norm || 'S/ LOTE').replace(/[^a-zA-Z0-9_-]/g, '_');
+                const mqData = maquinasReais.find(m => String(m.id) === String(dc.encaixotamento.maquina_id)) || {};
+                resTarefas.rows.push({
+                    id: `kit-${kit.id_norm}-${filtroSanitizado}-Encaixotamento`,
+                    sku_alvo: kit.id_norm,
+                    filtro_producao: kit.filtro_norm || 'S/ LOTE',
+                    grafica: kit.grafica,
+                    nome_etapa: 'Encaixotamento',
+                    maquina_id: String(dc.encaixotamento.maquina_id),
+                    tempo_estimado_horas: horas,
+                    id_dependencia: shrinkId,
+                    status_tarefa: 'Pendente',
+                    maq_tipo: mqData.tipo || 'Encaixotamento',
+                    maq_modelo: mqData.modelo || 'Encaixotamento',
+                    dias_trabalho: mqData.dias_trabalho || 5,
+                    horas_diarias: mqData.horas_diarias || 24,
+                    total_maquinas_parque: mqData.maquinas || 1,
+                    total_pessoas_parque: mqData.pessoas || 1,
+                    fases_overrides: '{}',
+                    pm_tiragem: 'Kit',
+                    pm_paginacao: 'Kit',
+                    pm_acabamento: 'Encaixotamento',
+                    ideal_inicio: new Date().toISOString(),
+                    kit_skus_custom: kit.skus,
+                    kit_filtro_original: kit.filtro_norm,
+                    _isVirtual: true,
+                    _isKit: true
+                });
+            }
+        }
+    }
 
     const travasMap = new Map();
     travasBD.forEach(t => {
@@ -85,7 +208,6 @@ export async function POST(request) {
         const maqT = String(t.maq_tipo).toLowerCase();
         const maqM = String(t.maq_modelo).toLowerCase();
 
-        // PREVENÇÃO DE DUPLO CÁLCULO (MÁQUINAS INLINE ALCEADEIRA + COLADEIRA)
         let tempoCorrigido = Number(t.tempo_estimado_horas);
         if (nomeE.includes('cola') && !nomeE.includes('alcead')) {
             const duplicataInline = resTarefas.rows.some(other =>
@@ -93,7 +215,6 @@ export async function POST(request) {
                 String(other.nome_etapa).toLowerCase().includes('alcead') &&
                 String(other.maquina_id) === String(t.maquina_id)
             );
-            // Se já existe Alceamento na mesma máquina, a Cola vira um marco de 1 minuto para não ocupar tempo duplo
             if (duplicataInline) {
                 tempoCorrigido = 0.016;
             }
@@ -115,11 +236,13 @@ export async function POST(request) {
             _isManualEspiral: nomeE.includes('espiral') && (
                 maqT.includes('manual') || maqM.includes('manual') ||
                 (!maqT.includes('auto') && !maqT.includes('semi') && !maqM.includes('auto') && !maqM.includes('semi'))
-            )
+            ),
+            _kitSkus: t.kit_skus_custom || [],
+            _kitFiltroOriginal: t.kit_filtro_original,
+            _isVirtual: t._isVirtual || false
         };
     });
 
-    // Apply fases_overrides: override ideal_inicio per phase if set
     indefinitas = indefinitas.map(t => {
       let overrides = {};
       try { overrides = typeof t.fases_overrides === 'string' ? JSON.parse(t.fases_overrides) : (t.fases_overrides || {}); } catch(e) {}
@@ -132,13 +255,12 @@ export async function POST(request) {
       return t;
     });
 
-    // MODO FLUIDO: filter to only visible lotes so the engine fills the gaps
+    // Filtra pelos lotes visíveis, mas IGNORA O FILTRO se for uma tarefa Virtual do Kit
     if (lotesVisiveis.length > 0) {
       const visiveisUp = new Set(lotesVisiveis.map(l => UPPER_CASE(l)));
-      indefinitas = indefinitas.filter(t => visiveisUp.has(UPPER_CASE(t.filtro_producao)));
+      indefinitas = indefinitas.filter(t => t._isVirtual || visiveisUp.has(UPPER_CASE(t.filtro_producao)));
     }
 
-    // FILA VIP: build priority map — index 0 = highest priority
     const prioridadeMap = new Map();
     prioridades.forEach((lote, idx) => prioridadeMap.set(UPPER_CASE(lote), idx));
     const getPrioridade = (filtro) => {
@@ -171,12 +293,15 @@ export async function POST(request) {
           r.setUTCDate(r.getUTCDate() + 1);
           r.setUTCHours(0, 0, 0, 0); continue;
         }
-        // Skip INATIVO calendar lock days so tasks never start on locked days
         if (maquinaId) {
           const ano = r.getUTCFullYear();
           const mes = String(r.getUTCMonth() + 1).padStart(2, '0');
           const dia = String(r.getUTCDate()).padStart(2, '0');
-          const trava = travasMap.get(`${UPPER_CASE(maquinaId)}_${ano}-${mes}-${dia}`);
+          
+          const travaGlobal = travasMap.get(`TODAS_${ano}-${mes}-${dia}`);
+          const travaEspec = travasMap.get(`${UPPER_CASE(maquinaId)}_${ano}-${mes}-${dia}`);
+          const trava = travaEspec || travaGlobal; 
+
           if (trava && trava.status_operacional === 'INATIVO') {
             r.setUTCDate(r.getUTCDate() + 1);
             r.setUTCHours(0, 0, 0, 0); continue;
@@ -211,7 +336,10 @@ export async function POST(request) {
         const dia = String(relogio.getUTCDate()).padStart(2, '0');
         const dataAlvoStr = `${ano}-${mes}-${dia}`;
 
-        const travaHoje = travasMap.get(`${UPPER_CASE(maquinaId)}_${dataAlvoStr}`);
+        const travaGlobal = travasMap.get(`TODAS_${dataAlvoStr}`);
+        const travaEspec = travasMap.get(`${UPPER_CASE(maquinaId)}_${dataAlvoStr}`);
+        const travaHoje = travaEspec || travaGlobal;
+
         let capacityHoje = Number(horasDiariasBase || 24);
 
         if (travaHoje) {
@@ -276,6 +404,23 @@ export async function POST(request) {
           }
         }
 
+        if (!pai && (nomeE.includes('capa') || nomeE.includes('encarte') || nomeE.includes('adesivo')) && nomeE.includes('impress')) {
+          const skuResolvidas = resolvidasPorSku.get(t._skuUp) || [];
+          const mioloResolvido = skuResolvidas.find(r => String(r.nome_etapa).toLowerCase() === 'impressão');
+          
+          if (mioloResolvido) {
+             const inicioMiolo = new Date(mioloResolvido.data_inicio);
+             if (inicioMiolo > tempoProntidaoTecnica) {
+                 tempoProntidaoTecnica = inicioMiolo;
+             }
+          } else {
+             const skuIndef = indefinitasPorSku.get(t._skuUp) || [];
+             if (skuIndef.some(r => String(r.nome_etapa).toLowerCase() === 'impressão')) {
+                 prontoParaAgendar = false;
+             }
+          }
+        }
+
         if (t._isFura) {
           const skuResolvidas = resolvidasPorSku.get(t._skuUp) || [];
           const alcResolvida = skuResolvidas.find(r => r._isAlc);
@@ -287,7 +432,103 @@ export async function POST(request) {
           }
         }
 
-        if (pai && prontoParaAgendar) {
+        // 🔴 KITS BLINDADOS: Amarração inteligente com Fallback Salvador e Correção Temporal!
+        if (t._isKit) {
+            const GET_LOTE = (val) => {
+                let s = UPPER_CASE(val);
+                return (!s || s === 'S/ LOTE') ? 'S/ LOTE' : s;
+            };
+
+            let loteAlvo = GET_LOTE(t._kitFiltroOriginal !== undefined ? t._kitFiltroOriginal : t.filtro_producao);
+            let chaveMapaKit = `${t._skuUp}_${loteAlvo}`;
+            let baseComp = t._kitSkus && t._kitSkus.length > 0 ? t._kitSkus : (mapaComponentesKit.get(chaveMapaKit) || []);
+
+            if (baseComp.length === 0) {
+                for (const [chave, comp] of mapaComponentesKit) {
+                    if (chave.startsWith(`${t._skuUp}_`)) {
+                        baseComp = comp;
+                        break;
+                    }
+                }
+            }
+
+            let componentes = Array.from(new Set([...baseComp, t._skuUp]));
+
+            if (componentes.length > 0) {
+                let todosResolvidos = true;
+                let maxFimComponentes = tempoProntidaoTecnica;
+                let precisaCura = false;
+                let usouFallback = false;
+
+                for (const compSku of componentes) {
+                    const tarefasDoComp = resolvidasPorSku.get(compSku) || [];
+                    const compIndef = indefinitasPorSku.get(compSku) || [];
+
+                    let cIndef = compIndef.filter(r => r.id !== t.id && !(t.nome_etapa === 'Shrink' && r.nome_etapa === 'Encaixotamento'));
+                    let cRes = tarefasDoComp.filter(r => r.id !== t.id && !(t.nome_etapa === 'Shrink' && r.nome_etapa === 'Encaixotamento'));
+
+                    let cIndefNoLote = cIndef.filter(r => GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo);
+                    let cResNoLote = cRes.filter(r => GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo);
+
+                    // 🚨 FALLBACK SALVADOR
+                    if (cIndefNoLote.length === 0 && cResNoLote.length === 0) {
+                        const todasTarefasNaoKitNoLote = indefinitas.filter(r =>
+                            !r._isKit &&
+                            GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo
+                        );
+
+                        if (todasTarefasNaoKitNoLote.length > 0) {
+                            todosResolvidos = false;
+                            break;
+                        }
+
+                        usouFallback = true;
+                        cIndefNoLote = [];
+                        cResNoLote = [];
+                    }
+
+                    if (cIndefNoLote.length > 0) {
+                        todosResolvidos = false;
+                        break;
+                    }
+
+                    for (const tc of cResNoLote) {
+                        const fim = new Date(tc.data_fim);
+                        if (fim > maxFimComponentes) maxFimComponentes = fim;
+                        if (tc._isPUR) precisaCura = true;
+                    }
+                }
+
+                // 🔴 FIX TEMPORAL: Ajusta o relógio para o fim do lote caso o fallback tenha sido usado
+                if (usouFallback && todosResolvidos) {
+                    const tarefasResolvidasNoLote = Array.from(resolvidasMap.values()).filter(r =>
+                        !r._isKit &&
+                        GET_LOTE(r._kitFiltroOriginal !== undefined ? r._kitFiltroOriginal : r.filtro_producao) === loteAlvo
+                    );
+                    for (const tr of tarefasResolvidasNoLote) {
+                        const fim = new Date(tr.data_fim);
+                        if (fim > maxFimComponentes) maxFimComponentes = fim;
+                    }
+                }
+
+                if (!todosResolvidos) {
+                    prontoParaAgendar = false;
+                } else {
+                    if (precisaCura) {
+                        maxFimComponentes = new Date(maxFimComponentes.getTime() + (24 * 60 * 60 * 1000));
+                    }
+                    if (maxFimComponentes > tempoProntidaoTecnica) {
+                        tempoProntidaoTecnica = maxFimComponentes;
+                    }
+                    // Respeita o Pai Direto (Ex: Encaixotamento esperando o Shrink)
+                    if (pai && new Date(pai.data_fim) > tempoProntidaoTecnica) {
+                        tempoProntidaoTecnica = new Date(pai.data_fim);
+                    }
+                }
+            }
+        }
+
+        if (pai && prontoParaAgendar && !t._isKit) { 
           if (pai._isPUR && t._isKit) delayCuraMs = 24 * 60 * 60 * 1000;
 
           if (t._isEspiral && pai._isFura) {
@@ -337,7 +578,6 @@ export async function POST(request) {
           prontoParaAgendar = false;
         }
 
-        // Barreira do Empastamento: Só pode iniciar após a Laminação/Beneficiamento da capa
         if (prontoParaAgendar && nomeE.includes('empast')) {
           const skuResolvidas = resolvidasPorSku.get(t._skuUp) || [];
           const skuIndef = indefinitasPorSku.get(t._skuUp) || [];
@@ -360,8 +600,6 @@ export async function POST(request) {
           }
         }
 
-        // Sincronismo Paralelo Blindado (Gathering Node):
-        // O Acabamento Final aguarda o término de TODAS as preparações, INCLUSIVE o Empastamento.
         const isAcabamentoFinal = t._isAlc || nomeE.includes('grampo') || nomeE.includes('canoa') || t._isFura || t._isEspiral;
         if (prontoParaAgendar && isAcabamentoFinal) {
           const skuResolvidas = resolvidasPorSku.get(t._skuUp) || [];
@@ -392,8 +630,7 @@ export async function POST(request) {
         candidatosAptos.push({ tarefa: indefinitas[0], trt: new Date(indefinitas[0].ideal_inicio) });
       }
       if (candidatosAptos.length === 0) break;
-      
-      // 1. Calcula o Início Real (AST - Actual Start Time) cruzando TRT com a fila atual da máquina
+
       candidatosAptos.forEach(c => {
         let mqId = String(c.tarefa.maquina_id || '').trim();
         if (c.tarefa._isManualEspiral) mqId = 'ESPIRALAR_MANUAL_UNIFIED';
@@ -402,27 +639,26 @@ export async function POST(request) {
         c.ast = Math.max(c.trt.getTime(), machineFreeTime);
       });
 
-      const menorAst = Math.min(...candidatosAptos.map(c => c.ast));
-      const JANELA_MS = 2 * 60 * 60 * 1000; // Retorna para 2 horas de tolerância máxima de ociosidade
+      // CORREÇÃO BUG 2: Prioridade MÁXIMA para Kits prontos (agendados imediatamente)
+      // Separa Kits prontos do resto
+      const kitsProntosIndex = candidatosAptos.findIndex(c => c.tarefa._isKit);
+      if (kitsProntosIndex !== -1) {
+        const kitPronto = candidatosAptos[kitsProntosIndex];
+        // Move para primeira posição
+        candidatosAptos.splice(kitsProntosIndex, 1);
+        candidatosAptos.unshift(kitPronto);
+        console.log(`[PRIORITY-DEBUG] Kit ${kitPronto.tarefa.id} elevado para primeira posição`);
+      }
 
       candidatosAptos.sort((a, b) => {
-        const aProximo = a.ast <= menorAst + JANELA_MS;
-        const bProximo = b.ast <= menorAst + JANELA_MS;
+        // Kits prontos SEMPRE primeiro
+        const aIsKit = a.tarefa._isKit ? 1 : 0;
+        const bIsKit = b.tarefa._isKit ? 1 : 0;
+        if (aIsKit !== bIsKit) return bIsKit - aIsKit; // Kits primeiro (maior valor = maior prioridade)
 
-        // Se ambos entram na máquina em horários próximos, a Prioridade VIP dita a regra de forma absoluta
-        if (aProximo && bProximo) {
-          const pA = getPrioridade(a.tarefa.filtro_producao);
-          const pB = getPrioridade(b.tarefa.filtro_producao);
-          if (pA !== pB) return pA - pB;
+        if (a.ast !== b.ast) {
           return a.ast - b.ast;
         }
-
-        if (aProximo && !bProximo) return -1;
-        if (!aProximo && bProximo) return 1;
-
-        if (a.ast !== b.ast) return a.ast - b.ast;
-
-        // Desempate final
         const pA = getPrioridade(a.tarefa.filtro_producao);
         const pB = getPrioridade(b.tarefa.filtro_producao);
         return pA - pB;
@@ -472,7 +708,6 @@ export async function POST(request) {
       let tempoRealAlocado = Number(tarefa.tempo_estimado_horas) > 0 ? Number(tarefa.tempo_estimado_horas) : 0.016; 
       let setupFoiDescontado = false;
 
-      // 🔴 REGRA DE SETUP INTELIGENTE: Se a máquina for Espiral Automática e a folga for < 12h, corta o setup!
       if (tarefa._isEspiral && !tarefa._isManualEspiral) {
           const mqData = maquinasReais.find(m => String(m.id) === String(mqId));
           const lastActivityTime = ultimaAtividadeMaquina[mqId];
@@ -481,7 +716,7 @@ export async function POST(request) {
               const gapHoras = (dataInicioReal.getTime() - lastActivityTime.getTime()) / (1000 * 60 * 60);
               if (gapHoras <= 12) {
                   const horasDeSetup = timeToDecimal(mqData.setup);
-                  tempoRealAlocado = Math.max(0.016, tempoRealAlocado - horasDeSetup); // Garante que a barra não zere
+                  tempoRealAlocado = Math.max(0.016, tempoRealAlocado - horasDeSetup);
                   setupFoiDescontado = true;
               }
           }
@@ -517,20 +752,20 @@ export async function POST(request) {
         slotEscolhidoIndex = slotsDisponiveisJuntos[0] || 0;
       }
 
-      // 🔴 Atualiza a memória da máquina para o próximo lote do loop!
       ultimaAtividadeMaquina[mqId] = janelaFinal.fim;
 
       const dadosTooltip = {
         tiragem: tarefa.pm_tiragem || 'N/A',
         paginacao: tarefa.pm_paginacao || 'N/A',
         acabamento: tarefa.pm_acabamento || 'N/A',
+        ideal_inicio: tarefa.ideal_inicio ? new Date(tarefa.ideal_inicio).toLocaleString('pt-BR', { timeZone:'UTC', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : 'N/A',
+        kit_skus: tarefa._kitSkus || [] 
       };
 
       const novaResolvida = {
         id: String(tarefa.id),
         sku_alvo: String(tarefa.sku_alvo),
         filtro_producao: String(tarefa.filtro_producao || 'S/ Lote'),
-        // Etiqueta visual para você saber quando o setup foi engolido na esteira!
         nome_etapa: setupFoiDescontado ? `${String(tarefa.nome_etapa)} 🔥 (-Setup)` : String(tarefa.nome_etapa),
         maquina_id: String(mqId),
         tempo_estimado_horas: Number(tarefa.tempo_estimado_horas) || 0,
@@ -548,7 +783,6 @@ export async function POST(request) {
         is_antecipacao: tarefa.is_antecipacao || false
       };
 
-      // Força a palavra 'Capa' no nome da etapa de empastamento para o Front-end agrupar na cor e categoria corretas
       if (String(novaResolvida.nome_etapa).toLowerCase().includes('empast') && !String(novaResolvida.nome_etapa).toLowerCase().includes('capa')) {
           novaResolvida.nome_etapa = novaResolvida.nome_etapa + ' de Capa';
       }
@@ -566,133 +800,6 @@ export async function POST(request) {
           else indefinitasPorSku.delete(tarefa._skuUp);
       }
       indefinitas = indefinitas.filter(item => item.id !== tarefa.id);
-    }
-
-    // -----------------------------------------------------------------------
-    // KIT MRP: Schedule encaixotamento/shrink AFTER all dependent SKUs finish
-    // -----------------------------------------------------------------------
-    try {
-      const resKits = await pool.query(
-        `SELECT kc.id_codigo_kit, kc.dados_calculo,
-                pk.id_codigo_sku_capa, pk.filtro_producao AS kit_filtro,
-                pk.grafica AS kit_grafica
-         FROM kit_calculos kc
-         JOIN prod_kits pk
-           ON UPPER(TRIM(kc.id_codigo_kit)) = UPPER(TRIM(pk.id_codigo_kit))
-          AND UPPER(TRIM(kc.filtro_producao)) = UPPER(TRIM(pk.filtro_producao))
-          AND UPPER(TRIM(kc.grafica)) = UPPER(TRIM(pk.grafica))
-         WHERE UPPER(TRIM(kc.grafica)) = UPPER(TRIM($1))
-           AND kc.dados_calculo IS NOT NULL`,
-        [grafica]
-      );
-
-      // Group: kit_id -> { dados_calculo, filtro, skus[] }
-      const kitsMap = new Map();
-      for (const row of resKits.rows) {
-        const key = UPPER_CASE(row.id_codigo_kit) + '|' + UPPER_CASE(row.kit_filtro);
-        if (!kitsMap.has(key)) {
-          let dc = {};
-          try { dc = typeof row.dados_calculo === 'string' ? JSON.parse(row.dados_calculo) : (row.dados_calculo || {}); } catch(e) {}
-          kitsMap.set(key, { id: row.id_codigo_kit, filtro: row.kit_filtro, grafica: row.kit_grafica, dados_calculo: dc, skus: [] });
-        }
-        if (row.id_codigo_sku_capa) kitsMap.get(key).skus.push(UPPER_CASE(row.id_codigo_sku_capa));
-      }
-
-      // Convert "HH:MM" string to decimal hours
-      const horasDeString = (str) => {
-        if (!str || !String(str).includes(':')) return 0;
-        const [h, m] = String(str).split(':');
-        return parseInt(h) + (parseInt(m) / 60);
-      };
-
-      for (const [, kit] of kitsMap) {
-        // Find the latest finish time among all resolved tasks for this kit's SKUs
-        let maxFim = null;
-        let precisaCuraPUR = false;
-
-        for (const skuCapa of kit.skus) {
-          const tarefasDoSku = resolvidasPorSku.get(skuCapa) || [];
-          for (const t of tarefasDoSku) {
-            const fim = new Date(t.data_fim);
-            if (!maxFim || fim > maxFim) maxFim = fim;
-
-            if (t._isPUR) precisaCuraPUR = true;
-          }
-        }
-
-        if (!maxFim) continue; // Pula se ainda não tem tarefas resolvidas
-
-        // 24h de cura da cola PUR aplicada APENAS antes de embalar/kit
-        if (precisaCuraPUR) {
-          maxFim = new Date(maxFim.getTime() + (24 * 60 * 60 * 1000));
-        }
-
-        const dc = kit.dados_calculo;
-
-        // Shrink MUST run before Encaixotamento — schedule Shrink first
-        let shrinkFim = new Date(maxFim);
-        if (dc.shrink?.maquina_id && dc.shrink?.resultado) {
-          const horas = horasDeString(dc.shrink.resultado.totais?.total);
-          if (horas > 0) {
-            const mqId = String(dc.shrink.maquina_id);
-            const filaAtual = controleMaquinasFim[mqId];
-            let tAtual = new Date(maxFim);
-            if (filaAtual) { const menorFim = new Date(Math.min(...filaAtual.map(d => d.getTime()))); if (menorFim > tAtual) tAtual = menorFim; }
-            const janela = simularJanelaDeTrabalho(tAtual, horas, mqId, 5, 24);
-            if (!controleMaquinasFim[mqId]) controleMaquinasFim[mqId] = [janela.fim];
-            else controleMaquinasFim[mqId][0] = janela.fim;
-            shrinkFim = janela.fim;
-            tarefasResolvidas.push({
-              id: `kit-${UPPER_CASE(kit.id)}-Shrink`,
-              sku_alvo: kit.id,
-              filtro_producao: String(kit.filtro || 'Kit'),
-              nome_etapa: 'Shrink',
-              maquina_id: mqId,
-              maq_tipo: 'Shrink', maq_modelo: 'Shrink',
-              tempo_estimado_horas: horas,
-              data_inicio: formataAbsoluto(janela.inicio),
-              data_fim: formataAbsoluto(janela.fim),
-              id_dependencia: null, status_tarefa: 'Pendente',
-              dados_tooltip: { tiragem: 'Kit', paginacao: 'Kit', acabamento: 'Shrink', kit_skus: kit.skus },
-              tempo_producao_efetivo: horas,
-              tempo_indisponivel_regra: janela.horasIndisponiveisRegra,
-              sub_linha: 0,
-            });
-          }
-        }
-
-        // Encaixotamento starts at Math.max(maxFim, shrinkFim)
-        if (dc.encaixotamento?.maquina_id && dc.encaixotamento?.resultado) {
-          const horas = horasDeString(dc.encaixotamento.resultado.totais?.total);
-          if (horas > 0) {
-            const mqId = String(dc.encaixotamento.maquina_id);
-            const filaAtual = controleMaquinasFim[mqId];
-            let tAtual = shrinkFim > maxFim ? shrinkFim : new Date(maxFim);
-            if (filaAtual) { const menorFim = new Date(Math.min(...filaAtual.map(d => d.getTime()))); if (menorFim > tAtual) tAtual = menorFim; }
-            const janela = simularJanelaDeTrabalho(tAtual, horas, mqId, 5, 24);
-            if (!controleMaquinasFim[mqId]) controleMaquinasFim[mqId] = [janela.fim];
-            else controleMaquinasFim[mqId][0] = janela.fim;
-            tarefasResolvidas.push({
-              id: `kit-${UPPER_CASE(kit.id)}-Encaixotamento`,
-              sku_alvo: kit.id,
-              filtro_producao: String(kit.filtro || 'Kit'),
-              nome_etapa: 'Encaixotamento',
-              maquina_id: mqId,
-              maq_tipo: 'Encaixotamento', maq_modelo: 'Encaixotamento',
-              tempo_estimado_horas: horas,
-              data_inicio: formataAbsoluto(janela.inicio),
-              data_fim: formataAbsoluto(janela.fim),
-              id_dependencia: null, status_tarefa: 'Pendente',
-              dados_tooltip: { tiragem: 'Kit', paginacao: 'Kit', acabamento: 'Encaixotamento', kit_skus: kit.skus },
-              tempo_producao_efetivo: horas,
-              tempo_indisponivel_regra: janela.horasIndisponiveisRegra,
-              sub_linha: 0,
-            });
-          }
-        }
-      }
-    } catch(kitErr) {
-      console.error('Kit MRP error:', kitErr.message);
     }
 
     return new Response(JSON.stringify(tarefasResolvidas), {
