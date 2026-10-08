@@ -4,6 +4,26 @@ import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300; 
 
+// 🔴 AUXILIAR: Converte uma coluna de data (varchar) em timestamp. Aceita DD/MM/AA e
+// DD/MM/AAAA (importação, com hora opcional) e AAAA-MM-DD (inputs de data da tela).
+// Qualquer outro conteúdo vira NULL, para o COALESCE cair na próxima data.
+const dataSql = (col) => `CASE
+                  WHEN ${col} ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}' THEN to_timestamp(${col}, 'DD/MM/YYYY HH24:MI')
+                  WHEN ${col} ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{2}' THEN to_timestamp(${col}, 'DD/MM/YY HH24:MI')
+                  WHEN ${col} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' THEN ${col}::timestamp
+                END`;
+
+// 🔴 AUXILIAR: Início Imp. "automático" = 5º dia útil (seg–sex) após a maior data entre
+// Fim Aprov. Arquivo e Envio Tiragem. NULL se nenhuma das duas existir.
+const inicioAutomaticoSql = (fim, envio) => `(
+                  SELECT g FROM generate_series(
+                    (GREATEST(${dataSql(fim)}, ${dataSql(envio)})::date + 1)::timestamp,
+                    (GREATEST(${dataSql(fim)}, ${dataSql(envio)})::date + 9)::timestamp,
+                    interval '1 day') AS g
+                  WHERE EXTRACT(ISODOW FROM g) < 6
+                  ORDER BY g OFFSET 4 LIMIT 1
+                )`;
+
 // 🔴 AUXILIAR: Transforma "04:00" em 4.0 horas decimais
 const timeToDecimal = (timeStr) => {
   if (!timeStr || !timeStr.includes(':')) return 0;
@@ -18,7 +38,7 @@ export async function POST(request) {
 
     if (!grafica) return NextResponse.json({ message: "Gráfica é obrigatória." }, { status: 400 });
 
-    const resMaquinas = await pool.query(`SELECT * FROM maquinas WHERE UPPER(TRIM(grafica)) = UPPER(TRIM($1))`, [grafica]);
+    const resMaquinas = await pool.query(`SELECT * FROM maquinas WHERE UPPER(TRIM(grafica)) = UPPER(TRIM($1)) AND ativo`, [grafica]);
     const maquinasReais = resMaquinas.rows;
 
     const resTarefas = await pool.query(
@@ -33,14 +53,13 @@ export async function POST(request) {
               pm.tiragem AS pm_tiragem,
               pm.paginacao AS pm_paginacao,
               pm.acabamento AS pm_acabamento,
-              CASE
-                WHEN NULLIF(d.dt_calculo, '') IS NOT NULL THEN
-                  CASE
-                    WHEN d.dt_calculo LIKE '%/%' THEN to_timestamp(d.dt_calculo, 'DD/MM/YY HH24:MI')
-                    ELSE d.dt_calculo::timestamp
-                  END
-                ELSE CURRENT_TIMESTAMP
-              END AS ideal_inicio
+              COALESCE(
+                ${dataSql('d.dt_calculo')},
+                ${dataSql('d.dt_replan_inicio_imp')},
+                ${dataSql('d.dt_plan_inicio_imp')},
+                ${inicioAutomaticoSql('d.dt_fim_aprove_arquivo', 'd.dt_envio_tiragem')},
+                CURRENT_TIMESTAMP
+              ) AS ideal_inicio
        FROM gantt_tarefas t
        LEFT JOIN maquinas m ON TRIM(t.maquina_id) = TRIM(m.id::text)
        LEFT JOIN prod_datas_iniciais d

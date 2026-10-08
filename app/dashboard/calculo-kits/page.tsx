@@ -134,7 +134,7 @@ export default function CalculoKits() {
       fetch(`/api/maquinas?ts=${Date.now()}`)
         .then(res => res.json())
         .then(dados => {
-          const mFiltradas = dados.filter((m: any) => String(m.grafica || '').toUpperCase() === String(grafica || '').toUpperCase());
+          const mFiltradas = dados.filter((m: any) => m.ativo !== false && String(m.grafica || '').toUpperCase() === String(grafica || '').toUpperCase());
           setMaquinasCarregadas(mFiltradas);
         }).catch(() => {});
     }

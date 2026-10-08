@@ -130,7 +130,7 @@ export default function RegistrosTempo() {
       fetch(`/api/maquinas?ts=${Date.now()}`)
         .then(res => res.json())
         .then(dados => {
-          const mFiltradas = dados.filter((m: any) => String(m.grafica || '').toUpperCase() === String(grafica || '').toUpperCase());
+          const mFiltradas = dados.filter((m: any) => m.ativo !== false && String(m.grafica || '').toUpperCase() === String(grafica || '').toUpperCase());
           setMaquinasCargadas(mFiltradas);
         }).catch(() => {});
     }
@@ -209,7 +209,7 @@ export default function RegistrosTempo() {
       let dadosMaq = [];
       if(resMaq.ok) {
          const mBase = await resMaq.json();
-         dadosMaq = mBase.filter((m: any) => String(m.grafica).toUpperCase() === String(graficaEscolhida).toUpperCase());
+         dadosMaq = mBase.filter((m: any) => m.ativo !== false && String(m.grafica).toUpperCase() === String(graficaEscolhida).toUpperCase());
       }
 
       setFiltroProducao("Lotes em Massa (" + lotesSelecionados.length + ")");
@@ -409,6 +409,14 @@ export default function RegistrosTempo() {
              return false;
          });
          if (filtradas.length > 0) candidatas = filtradas;
+         else {
+             // Sem a tecnologia exata (ex.: gráfica sem Rotativa Offset ativa): cai para
+             // o mesmo processo (Offset/Digital) antes de aceitar qualquer impressora.
+             const pref = tecnologiaPreferida.toUpperCase();
+             const processo = pref.includes("OFFSET") ? "OFFSET" : pref.includes("DIGITAL") ? "DIGITAL" : null;
+             const mesmoProcesso = processo ? candidatas.filter(m => `${m.tipo || ''} ${m.modelo || ''}`.toUpperCase().includes(processo)) : [];
+             if (mesmoProcesso.length > 0) candidatas = mesmoProcesso;
+         }
     }
 
     const nomeGrafica = String(grafica).trim().toUpperCase();

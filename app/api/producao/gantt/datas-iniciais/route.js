@@ -32,13 +32,20 @@ export async function POST(request) {
     if (!sku || !filtro_producao || !grafica) {
       return NextResponse.json({ message: "sku, filtro_producao e grafica são obrigatórios." }, { status: 400 });
     }
-    await pool.query(
-      `INSERT INTO prod_datas_iniciais (sku, filtro_producao, grafica, dt_calculo, fases_overrides)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (sku, filtro_producao, grafica)
-       DO UPDATE SET dt_calculo = EXCLUDED.dt_calculo, fases_overrides = EXCLUDED.fases_overrides`,
-      [sku.toUpperCase().trim(), filtro_producao.toUpperCase().trim(), grafica.toUpperCase().trim(), dt_calculo, JSON.stringify(fases_overrides || {})]
+    // prod_datas_iniciais não tem constraint única em (sku, filtro, gráfica), então não dá
+    // para usar ON CONFLICT: atualiza a linha existente e só insere se não houver nenhuma.
+    const params = [sku.toUpperCase().trim(), filtro_producao.toUpperCase().trim(), grafica.toUpperCase().trim(), dt_calculo, JSON.stringify(fases_overrides || {})];
+    const { rowCount } = await pool.query(
+      `UPDATE prod_datas_iniciais SET dt_calculo = $4, fases_overrides = $5
+        WHERE UPPER(TRIM(sku)) = $1 AND UPPER(TRIM(filtro_producao)) = $2 AND UPPER(TRIM(grafica)) = $3`,
+      params
     );
+    if (rowCount === 0) {
+      await pool.query(
+        `INSERT INTO prod_datas_iniciais (sku, filtro_producao, grafica, dt_calculo, fases_overrides) VALUES ($1, $2, $3, $4, $5)`,
+        params
+      );
+    }
     return NextResponse.json({ message: "Data atualizada com sucesso!" });
   } catch (e) {
     console.error('datas-iniciais POST error:', e.message);

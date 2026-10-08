@@ -15,6 +15,22 @@ export async function DELETE(request, props) {
   }
 }
 
+// ATIVAR / INATIVAR MÁQUINA (PATCH) — inativa sai dos cálculos e do Gantt sem perder o cadastro
+export async function PATCH(request, props) {
+  try {
+    const { id } = await props.params;
+    const { ativo } = await request.json();
+    if (typeof ativo !== 'boolean') return NextResponse.json({ message: "Campo 'ativo' deve ser true ou false." }, { status: 400 });
+
+    const result = await pool.query('UPDATE maquinas SET ativo = $1 WHERE id = $2', [ativo, id]);
+    if (result.rowCount === 0) return NextResponse.json({ message: "Máquina não encontrada." }, { status: 404 });
+    return NextResponse.json({ message: ativo ? "Máquina reativada!" : "Máquina inativada!" }, { status: 200 });
+  } catch (error) {
+    console.error("Erro ao alterar status da máquina:", error);
+    return NextResponse.json({ message: "Erro ao alterar status da máquina." }, { status: 500 });
+  }
+}
+
 // ATUALIZAR MÁQUINA (PUT)
 export async function PUT(request, props) {
   try {

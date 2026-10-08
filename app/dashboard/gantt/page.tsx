@@ -106,7 +106,7 @@ const MachineRow = memo(function MachineRow({
     <div style={{ height: `${alturaLinhaCalculada}px` }} className="w-full border-b flex relative bg-white transition-all border-b-slate-200">
       {cellData.map(({ cell, capacidadeTotalPeriodo, cellTitle, idx }) => (
         <div key={`bg-cell-${idx}`} title={cellTitle} style={{ width: `${cell.width}px` }}
-          className={`flex-shrink-0 border-r border-dashed h-full hover:bg-black/5 cursor-crosshair transition-colors ${cell.isBgInativo || capacidadeTotalPeriodo === 0 ? 'bg-slate-100/80' : ''}`}
+          className={`shrink-0 border-r border-dashed h-full hover:bg-black/5 cursor-crosshair transition-colors ${cell.isBgInativo || capacidadeTotalPeriodo === 0 ? 'bg-slate-100/80' : ''}`}
           onDoubleClick={() => {
             const d = cell.start;
             const dateStr = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
@@ -127,7 +127,7 @@ const MachineRow = memo(function MachineRow({
           : 'transition-all duration-150 shadow-md hover:z-50 hover:scale-105';
         return (
           <div key={tarefa.id} onClick={() => onClickBloco(tarefa)}
-            className={`absolute h-7 ${corClasseFinal} ${opacityClass} rounded flex flex-col justify-center px-1.5 cursor-pointer font-mono overflow-hidden whitespace-nowrap min-w-[20px] pointer-events-auto shadow ${tarefa.is_antecipacao ? 'border-2 border-dashed border-red-400' : 'border'}`}
+            className={`absolute h-7 ${corClasseFinal} ${opacityClass} rounded flex flex-col justify-center px-1.5 cursor-pointer font-mono overflow-hidden whitespace-nowrap min-w-5 pointer-events-auto shadow ${tarefa.is_antecipacao ? 'border-2 border-dashed border-red-400' : 'border'}`}
             style={{ left, width, top: `${dTop}px` }} title={tooltipTexto}>
             <span className="text-[9px] font-black truncate block">{tarefa.sku_alvo}</span>
             {widthNum > 50 && <span className="text-[7px] opacity-80 truncate block uppercase">{tarefa.nome_etapa} (F.{tarefa.sub_linha + 1})</span>}
@@ -226,7 +226,7 @@ export default function GanttIndustrial() {
       setLoadingMsg('Consultando o banco de dados das máquinas...');
       const resMaq = await fetch(`/api/maquinas?ts=${Date.now()}`);
       const dadosMaq = await resMaq.json();
-      const mFiltradas = dadosMaq.filter((m: any) => String(m.grafica || '').toUpperCase() === graficaAlvo);
+      const mFiltradas = dadosMaq.filter((m: any) => m.ativo !== false && String(m.grafica || '').toUpperCase() === graficaAlvo);
       let listaMaquinasFinal = mFiltradas.filter((m: any) => !String(m.modelo).toLowerCase().includes('espiralar'));
       const espiraisFisicas = mFiltradas.filter((m: any) => String(m.modelo).toLowerCase().includes('espiralar') || String(m.tipo).toLowerCase().includes('espiral'));
       const capacidadePessoasEspiral = espiraisFisicas.reduce((acc: number, m: any) => acc + Math.max(Number(m.pessoas || 1), Number(m.maquinas || 1)), 0);
@@ -367,10 +367,21 @@ export default function GanttIndustrial() {
         dataAtual.setUTCDate(dataAtual.getUTCDate() + 1);
       }
 
-      await Promise.all(promises);
+      const respostas = await Promise.all(promises);
+      const falhas = respostas.filter(r => !r.ok);
+      if (falhas.length > 0) {
+        const detalhe = await falhas[0].json().catch(() => ({}));
+        setImpactoToast(`⚠️ ${falhas.length} de ${respostas.length} dia(s) não foram gravados: ${detalhe.message || `HTTP ${falhas[0].status}`}`);
+      } else {
+        setImpactoToast(`✅ ${respostas.length} dia(s) de trava gravado(s).`);
+      }
       setMotivoTrava('');
-      abrirGanttDaGrafica(graficaSelecionada); 
-    } catch (err) {}
+      setIsLoading(false);
+      abrirGanttDaGrafica(graficaSelecionada);
+      return;
+    } catch (err) {
+      setImpactoToast('⚠️ Falha ao gravar a trava. Verifique a conexão e tente novamente.');
+    }
     setIsLoading(false);
   };
 
@@ -667,7 +678,7 @@ export default function GanttIndustrial() {
   return (
     <div className="w-full relative">
       {isLoading && (
-        <div className="fixed inset-0 bg-slate-900/90 z-[9999] flex flex-col justify-center items-center backdrop-blur-sm">
+        <div className="fixed inset-0 bg-slate-900/90 z-9999 flex flex-col justify-center items-center backdrop-blur-sm">
           <i className="fas fa-layer-group text-6xl text-violet-500 mb-6 animate-bounce"></i>
           <h2 className="text-2xl font-black text-white uppercase tracking-widest animate-pulse">{loadingMsg}</h2>
           <p className="text-violet-200 mt-3 font-mono text-sm border border-violet-500/50 p-3 rounded bg-violet-950/50">Por favor, aguarde o cálculo. Não clique nem recarregue a página.</p>
@@ -710,7 +721,7 @@ export default function GanttIndustrial() {
                   Prioridades {loteFocado ? `• ${String(loteFocado).substring(0, 8)}` : `(${draftLotesOcultos.size === 0 ? 'Todos' : `${draftPrioridades.length - draftLotesOcultos.size} vis.`})`}
                 </button>
                 {showFiltroLote && (
-                  <div className="absolute top-full right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 z-[9000] overflow-hidden">
+                  <div className="absolute top-full right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 z-9000 overflow-hidden">
                     <div className="bg-slate-800 text-white px-4 py-2.5 flex justify-between items-center">
                       <span className="text-[11px] font-black uppercase tracking-wider flex items-center gap-2"><i className="fas fa-sort-amount-down text-violet-400"></i> Painel de Prioridades</span>
                       <button onClick={() => setShowFiltroLote(false)} className="text-slate-400 hover:text-white text-sm font-bold">&times;</button>
@@ -746,14 +757,14 @@ export default function GanttIndustrial() {
                               className="w-8 text-[10px] font-black text-slate-600 text-center border border-slate-200 rounded-md bg-white outline-none focus:border-violet-400 px-0.5 cursor-text"
                             />
                             <span className="text-slate-300 hover:text-violet-400 text-xs" title="Arraste para reordenar">⠿</span>
-                            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${(mapaCoresLotes[lote as string] || 'bg-slate-400').split(' ')[0]}`}></span>
+                            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${(mapaCoresLotes[lote as string] || 'bg-slate-400').split(' ')[0]}`}></span>
                             <button onClick={() => setLoteFocado(isFocado ? null : lote as string)}
                               className={`flex-1 text-left text-xs font-bold truncate cursor-pointer transition-colors ${isFocado ? 'text-amber-700' : 'text-slate-700 hover:text-violet-700'}`}
                               title={`Clique para focar em: ${lote}`}>
                               {String(lote || 'SEM LOTE')}
                               {isFocado && <span className="ml-1 text-amber-500 text-[9px]">★ FOCO</span>}
                             </button>
-                            <input type="checkbox" className="w-3.5 h-3.5 accent-violet-600 cursor-pointer flex-shrink-0" checked={ativo} onChange={() => toggleFiltroLote(lote as string)} />
+                            <input type="checkbox" className="w-3.5 h-3.5 accent-violet-600 cursor-pointer shrink-0" checked={ativo} onChange={() => toggleFiltroLote(lote as string)} />
                           </div>
                         );
                       })}
@@ -786,15 +797,15 @@ export default function GanttIndustrial() {
 
           <div className="flex-1 overflow-auto bg-slate-50/20 relative">
             <div className="flex w-max min-w-full">
-              <div className="w-[300px] flex-shrink-0 sticky left-0 z-30 bg-slate-50 border-r flex flex-col shadow-md select-none">
-                <div className="h-[74px] bg-slate-200 border-b flex items-center px-4 font-bold text-xs uppercase text-slate-600 sticky top-0 left-0 z-50">Equipamentos</div>
+              <div className="w-75 shrink-0 sticky left-0 z-30 bg-slate-50 border-r flex flex-col shadow-md select-none">
+                <div className="h-18.5 bg-slate-200 border-b flex items-center px-4 font-bold text-xs uppercase text-slate-600 sticky top-0 left-0 z-50">Equipamentos</div>
                 <div className="flex-1">
                   {setoresFixos.map(setor => {
                     const maqSetor = maquinas.filter(m => (setorPorMaquina.get(String(m.id).trim()) || obterSetorPertencente(m.tipo, '')) === setor);
                     if (maqSetor.length === 0) return null;
                     return (
                       <div key={setor}>
-                        <div className="h-[30px] bg-slate-200/50 text-[10px] font-black uppercase text-violet-900 px-4 flex items-center border-b z-10 relative">{setor}</div>
+                        <div className="h-7.5 bg-slate-200/50 text-[10px] font-black uppercase text-violet-900 px-4 flex items-center border-b z-10 relative">{setor}</div>
                         {maqSetor.map(mq => {
                           const configMq = simuladores[mq.id] || configPadraoMaquina(mq);
                           const tarefasDaMq = tarefasPorMaquinaSetor.get(`${setor}::${String(mq.id).trim()}`) || [];
@@ -827,10 +838,10 @@ export default function GanttIndustrial() {
               <div className="flex-1 flex flex-col relative">
                 <div className="flex flex-col sticky top-0 z-40 bg-white border-b shadow-md w-max min-w-full select-none">
                   <div className="flex h-6 bg-slate-100 text-[9px] font-bold text-slate-500 font-mono border-b border-slate-200 divide-x divide-slate-200">
-                    {Rulers.macroHeader.map((m, i) => (<div key={i} style={{ width: `${m.width}px` }} className="flex-shrink-0 text-center flex items-center justify-center bg-slate-200/40 text-violet-950 font-black tracking-tight uppercase px-0.5 truncate">{m.label}</div>))}
+                    {Rulers.macroHeader.map((m, i) => (<div key={i} style={{ width: `${m.width}px` }} className="shrink-0 text-center flex items-center justify-center bg-slate-200/40 text-violet-950 font-black tracking-tight uppercase px-0.5 truncate">{m.label}</div>))}
                   </div>
                   <div className="flex h-12 text-[11px] font-bold text-slate-700 font-mono divide-x divide-slate-100">
-                    {Rulers.microHeader.map((m, i) => (<div key={i} style={{ width: `${m.width}px` }} className="flex-shrink-0 flex flex-col justify-center items-center bg-white text-slate-700"><span className="text-[9px] uppercase text-slate-400">{m.sub}</span><span className="text-xs font-black">{m.label}</span></div>))}
+                    {Rulers.microHeader.map((m, i) => (<div key={i} style={{ width: `${m.width}px` }} className="shrink-0 flex flex-col justify-center items-center bg-white text-slate-700"><span className="text-[9px] uppercase text-slate-400">{m.sub}</span><span className="text-xs font-black">{m.label}</span></div>))}
                   </div>
                 </div>
 
@@ -840,7 +851,7 @@ export default function GanttIndustrial() {
                     if (maqSetor.length === 0) return null;
                     return (
                       <div key={`grid-${setor}`}>
-                        <div className="h-[30px] w-full border-b bg-slate-100/40"></div>
+                        <div className="h-7.5 w-full border-b bg-slate-100/40"></div>
                         {maqSetor.map(mq => (
                           <MachineRow
                             key={`grid-mq-${mq.id}`}
@@ -870,7 +881,7 @@ export default function GanttIndustrial() {
 
       {/* TOAST DE IMPACTO */}
       {impactoToast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] bg-slate-900 text-white px-6 py-3 rounded-xl shadow-2xl text-sm font-bold flex items-center gap-3 animate-in slide-in-from-bottom-4">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-9999 bg-slate-900 text-white px-6 py-3 rounded-xl shadow-2xl text-sm font-bold flex items-center gap-3 animate-in slide-in-from-bottom-4">
           <i className="fas fa-check-circle text-emerald-400"></i>
           {impactoToast}
           <button onClick={() => setImpactoToast(null)} className="ml-2 text-slate-400 hover:text-white">&times;</button>
@@ -879,7 +890,7 @@ export default function GanttIndustrial() {
 
       {/* MODAL EDIÇÃO DE DATAS */}
       {showModalEditeDatas && blocoEditando && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[9998] p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowModalEditeDatas(false); }}>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-9998 p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowModalEditeDatas(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh]">
             <header className="bg-slate-800 p-4 text-white flex justify-between items-center">
               <div>
@@ -973,7 +984,7 @@ export default function GanttIndustrial() {
       )}
 
       {showModalRelatorio && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[999] p-4">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-999 p-4">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-6xl overflow-hidden flex flex-col max-h-[85vh]">
             <header className="bg-teal-700 p-4 text-white flex justify-between items-center">
               <h3 className="font-bold text-sm uppercase tracking-wide"><i className="fas fa-list-alt mr-2"></i> Relatório Consolidado de Marcos Operacionais</h3>
@@ -991,9 +1002,9 @@ export default function GanttIndustrial() {
                     <th className="p-3 border-b border-slate-200 text-center">Paginação</th>
                     <th className="p-3 border-b border-slate-200 text-center">Acabamento</th>
                     <th className="p-3 border-b border-slate-200 text-center text-sky-800 bg-sky-50/50">Início Impressão</th>
-                    <th className="p-3 border-b border-slate-200 text-center text-sky-800 bg-sky-50/50 border-r border-slate-200">Fim Impressão</th>
+                    <th className="p-3 border-b text-center text-sky-800 bg-sky-50/50 border-r border-slate-200">Fim Impressão</th>
                     <th className="p-3 border-b border-slate-200 text-amber-800 bg-amber-50/50 text-center">Início Acabamentos</th>
-                    <th className="p-3 border-b border-slate-200 text-amber-800 bg-amber-50/50 text-center border-r border-slate-200">Fim Acabamentos</th>
+                    <th className="p-3 border-b text-amber-800 bg-amber-50/50 text-center border-r border-slate-200">Fim Acabamentos</th>
                     <th className="p-3 border-b border-slate-200 text-purple-800 bg-purple-50/50 text-center">Início Form. Kit</th>
                     <th className="p-3 border-b border-slate-200 text-purple-800 bg-purple-50/50 text-center">Término Geral</th>
                   </tr>
@@ -1022,7 +1033,7 @@ export default function GanttIndustrial() {
       )}
 
       {showModalTravas && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[999] p-4">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-999 p-4">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
             <header className="bg-slate-800 p-3 text-white flex justify-between items-center">
               <div className="flex gap-4">
@@ -1105,7 +1116,7 @@ export default function GanttIndustrial() {
             )}
           {/* MODAL DE CONFIRMAÇÃO DE REMOÇÃO DE TRAVA */}
                 {travaParaRemover && (
-                  <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+                  <div className="fixed inset-0 z-9999 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
                     <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full animate-in zoom-in-95 duration-200 border border-slate-200">
                       <div className="flex items-center justify-center w-12 h-12 rounded-full bg-red-100 text-red-600 mb-4 mx-auto">
                         <i className="fas fa-exclamation-triangle text-xl"></i>

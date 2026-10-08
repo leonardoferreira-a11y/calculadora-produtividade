@@ -1,4 +1,4 @@
-import pool from '@/lib/db';
+import pool, { comTransacao } from '@/lib/db';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -53,44 +53,56 @@ export async function GET() {
   }
 }
 
+// Aceita o formato antigo ({ filtro_producao, grafica }) ou em massa ({ lotes: [...] }).
+// Retorna a lista de lotes únicos (por filtro+gráfica, sem diferenciar caixa).
+function lerLotes(body) {
+  const brutos = Array.isArray(body?.lotes) ? body.lotes : [body];
+  const vistos = new Set();
+  const lotes = [];
+  for (const l of brutos) {
+    const filtro = String(l?.filtro_producao ?? '').trim();
+    const grafica = String(l?.grafica ?? '').trim();
+    if (!filtro || !grafica) return null;
+    const k = `${filtro.toUpperCase()}|${grafica.toUpperCase()}`;
+    if (vistos.has(k)) continue;
+    vistos.add(k);
+    lotes.push({ filtro, grafica });
+  }
+  return lotes.length > 0 ? lotes : null;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
-// DELETE: apaga um lote por completo (5 tabelas físicas + 2 de cálculo) dentro
-// de uma transação. Body: { filtro_producao, grafica }.
+// DELETE: apaga um ou vários lotes por completo (5 tabelas físicas + cálculos)
+// numa única transação. Body: { filtro_producao, grafica } ou { lotes: [{ filtro_producao, grafica }] }.
 // ────────────────────────────────────────────────────────────────────────────
 export async function DELETE(request) {
-  const client = await pool.connect();
   try {
-    const { filtro_producao, grafica } = await request.json();
-
-    if (!filtro_producao || !grafica) {
-      client.release();
-      return NextResponse.json({ message: "filtro_producao e grafica são obrigatórios." }, { status: 400 });
+    const lotes = lerLotes(await request.json());
+    if (!lotes) {
+      return NextResponse.json({ message: "filtro_producao e grafica são obrigatórios para cada lote." }, { status: 400 });
     }
 
-    const filtro = String(filtro_producao).trim();
-    const grafica_limpa = String(grafica).trim();
+    const filtros = lotes.map(l => l.filtro.toUpperCase());
+    const graficas = lotes.map(l => l.grafica.toUpperCase());
 
-    await client.query('BEGIN');
+    const totalApagado = await comTransacao(async (client) => {
+      let total = 0;
+      for (const tabela of [...TABELAS_FISICAS, ...TABELAS_CALCULO, 'kit_calculos']) {
+        const res = await client.query(
+          `DELETE FROM ${tabela} AS x
+           USING UNNEST($1::text[], $2::text[]) AS l(filtro, grafica)
+           WHERE UPPER(TRIM(x.filtro_producao)) = l.filtro
+             AND UPPER(TRIM(x.grafica)) = l.grafica`,
+          [filtros, graficas]
+        );
+        total += res.rowCount || 0;
+      }
+      return total;
+    });
 
-    const todasTabelas = [...TABELAS_FISICAS, ...TABELAS_CALCULO];
-    let totalApagado = 0;
-    for (const tabela of todasTabelas) {
-      const res = await client.query(
-        `DELETE FROM ${tabela}
-         WHERE UPPER(TRIM(filtro_producao)) = UPPER(TRIM($1))
-           AND UPPER(TRIM(grafica)) = UPPER(TRIM($2))`,
-        [filtro, grafica_limpa]
-      );
-      totalApagado += res.rowCount || 0;
-    }
-
-    await client.query('COMMIT');
-    client.release();
-
-    return NextResponse.json({ message: "Lote apagado com sucesso!", linhas_removidas: totalApagado }, { status: 200 });
+    const message = lotes.length === 1 ? "Lote apagado com sucesso!" : `${lotes.length} lotes apagados com sucesso!`;
+    return NextResponse.json({ message, lotes_removidos: lotes.length, linhas_removidas: totalApagado }, { status: 200 });
   } catch (error) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    client.release();
     console.error("❌ ERRO AO APAGAR LOTE:", error.message);
     return NextResponse.json({ message: `Erro ao apagar lote: ${error.message}` }, { status: 500 });
   }
@@ -99,66 +111,79 @@ export async function DELETE(request) {
 // ────────────────────────────────────────────────────────────────────────────
 // POST (Duplicar): copia as linhas das 5 tabelas físicas substituindo apenas o
 // filtro_producao pelo novo nome. O lote novo nasce sem cálculo (não copia
-// os_calculos nem gantt_tarefas). Body: { filtro_producao, grafica, novo_filtro_producao }.
+// os_calculos nem gantt_tarefas).
+//  - Um lote : { filtro_producao, grafica, novo_filtro_producao } (409 se o nome já existir).
+//  - Em massa: { lotes: [{ filtro_producao, grafica }], sufixo? } — cada cópia recebe
+//    "<nome><sufixo>" (padrão " - CÓPIA"); se já existir, numera: " - CÓPIA 2", " - CÓPIA 3"...
 // ────────────────────────────────────────────────────────────────────────────
 export async function POST(request) {
-  const client = await pool.connect();
   try {
-    const { filtro_producao, grafica, novo_filtro_producao } = await request.json();
-
-    if (!filtro_producao || !grafica || !novo_filtro_producao) {
-      client.release();
-      return NextResponse.json({ message: "filtro_producao, grafica e novo_filtro_producao são obrigatórios." }, { status: 400 });
+    const body = await request.json();
+    const emMassa = Array.isArray(body?.lotes);
+    const lotes = lerLotes(body);
+    if (!lotes) {
+      return NextResponse.json({ message: "filtro_producao e grafica são obrigatórios para cada lote." }, { status: 400 });
     }
 
-    const filtro = String(filtro_producao).trim();
-    const grafica_limpa = String(grafica).trim();
-    const novoFiltro = String(novo_filtro_producao).trim();
-
-    if (novoFiltro.toUpperCase() === filtro.toUpperCase()) {
-      client.release();
-      return NextResponse.json({ message: "O novo nome do lote deve ser diferente do atual." }, { status: 400 });
-    }
-
-    // Bloqueia duplicação para um nome de lote que já exista nesta gráfica.
-    const jaExiste = await client.query(
-      `SELECT 1 FROM prod_miolo
-       WHERE UPPER(TRIM(filtro_producao)) = UPPER(TRIM($1))
-         AND UPPER(TRIM(grafica)) = UPPER(TRIM($2)) LIMIT 1`,
-      [novoFiltro, grafica_limpa]
+    // Nomes de lote já existentes, por gráfica (para evitar colisão).
+    const existentesRes = await pool.query(
+      `SELECT DISTINCT UPPER(TRIM(filtro_producao)) AS filtro, UPPER(TRIM(grafica)) AS grafica FROM prod_miolo`
     );
-    if (jaExiste.rows.length > 0) {
-      client.release();
-      return NextResponse.json({ message: `Já existe um lote "${novoFiltro}" nesta gráfica.` }, { status: 409 });
+    const ocupados = new Set(existentesRes.rows.map(r => `${r.filtro}|${r.grafica}`));
+    const ocupado = (filtro, grafica) => ocupados.has(`${filtro.toUpperCase()}|${grafica.toUpperCase()}`);
+
+    if (emMassa) {
+      const sufixo = String(body.sufixo ?? '').trim() ? ` ${String(body.sufixo).trim()}` : ' - CÓPIA';
+      for (const l of lotes) {
+        let novo = `${l.filtro}${sufixo}`;
+        for (let n = 2; ocupado(novo, l.grafica); n++) novo = `${l.filtro}${sufixo} ${n}`;
+        l.novo = novo;
+        ocupados.add(`${novo.toUpperCase()}|${l.grafica.toUpperCase()}`);
+      }
+    } else {
+      const novo = String(body.novo_filtro_producao ?? '').trim();
+      if (!novo) {
+        return NextResponse.json({ message: "novo_filtro_producao é obrigatório." }, { status: 400 });
+      }
+      if (novo.toUpperCase() === lotes[0].filtro.toUpperCase()) {
+        return NextResponse.json({ message: "O novo nome do lote deve ser diferente do atual." }, { status: 400 });
+      }
+      if (ocupado(novo, lotes[0].grafica)) {
+        return NextResponse.json({ message: `Já existe um lote "${novo}" nesta gráfica.` }, { status: 409 });
+      }
+      lotes[0].novo = novo;
     }
 
-    await client.query('BEGIN');
+    const filtros = lotes.map(l => l.filtro.toUpperCase());
+    const graficas = lotes.map(l => l.grafica.toUpperCase());
+    const novos = lotes.map(l => l.novo);
 
-    let totalCopiado = 0;
-    for (const tabela of TABELAS_FISICAS) {
-      const colunas = COLUNAS_FISICAS[tabela];
-      const insertCols = colunas.join(', ');
-      // 1ª coluna (filtro_producao) recebe o novo nome ($1); as demais são copiadas por nome.
-      const selectCols = ['$1', ...colunas.slice(1)].join(', ');
+    const totalCopiado = await comTransacao(async (client) => {
+      let total = 0;
+      for (const tabela of TABELAS_FISICAS) {
+        const colunas = COLUNAS_FISICAS[tabela];
+        // 1ª coluna (filtro_producao) recebe o novo nome; as demais são copiadas por nome.
+        const selectCols = ['l.novo', ...colunas.slice(1).map(c => `x.${c}`)].join(', ');
+        const res = await client.query(
+          `INSERT INTO ${tabela} (${colunas.join(', ')})
+           SELECT ${selectCols}
+           FROM ${tabela} AS x
+           JOIN UNNEST($1::text[], $2::text[], $3::text[]) AS l(filtro, grafica, novo)
+             ON UPPER(TRIM(x.filtro_producao)) = l.filtro
+            AND UPPER(TRIM(x.grafica)) = l.grafica
+           ON CONFLICT DO NOTHING`, // índice único de prod_datas_iniciais (sobras órfãs no lote destino)
+          [filtros, graficas, novos]
+        );
+        total += res.rowCount || 0;
+      }
+      return total;
+    });
 
-      const res = await client.query(
-        `INSERT INTO ${tabela} (${insertCols})
-         SELECT ${selectCols}
-         FROM ${tabela}
-         WHERE UPPER(TRIM(filtro_producao)) = UPPER(TRIM($2))
-           AND UPPER(TRIM(grafica)) = UPPER(TRIM($3))`,
-        [novoFiltro, filtro, grafica_limpa]
-      );
-      totalCopiado += res.rowCount || 0;
-    }
-
-    await client.query('COMMIT');
-    client.release();
-
-    return NextResponse.json({ message: `Lote duplicado como "${novoFiltro}"!`, linhas_copiadas: totalCopiado }, { status: 201 });
+    const message = lotes.length === 1
+      ? `Lote duplicado como "${lotes[0].novo}"!`
+      : `${lotes.length} lotes duplicados: ${novos.join(', ')}`;
+    return NextResponse.json({ message, novos_lotes: novos, linhas_copiadas: totalCopiado }, { status: 201 });
   } catch (error) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    client.release();
     console.error("❌ ERRO AO DUPLICAR LOTE:", error.message);
     return NextResponse.json({ message: `Erro ao duplicar lote: ${error.message}` }, { status: 500 });
   }
