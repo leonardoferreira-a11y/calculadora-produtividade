@@ -2,6 +2,9 @@
 import { useEffect, useState, useRef } from 'react';
 
 // Auxiliares de conversão de tempo
+// Frete (hh:mm -> horas decimais): cobrado UMA vez por etapa/máquina, não por setup.
+const freteDe = (m: any): number => timeToDecimal((m && m.frete) || '00:00');
+
 const timeToDecimal = (timeStr: string) => {
   if (!timeStr || timeStr === 'Pend.' || timeStr === '-') return 0;
   let d = 0, h = 0, m = 0;
@@ -89,6 +92,16 @@ export default function CalculoKits() {
   const [progressoRobo, setProgressoRobo] = useState({ atual: 0, total: 0, status: '', tipo: '' });
   const cancelarRoboRef = useRef(false);
 
+  const [lotesSelecionados, setLotesSelecionados] = useState<string[]>([]);
+  const [emMassa, setEmMassa] = useState(false);
+  const [aviso, setAviso] = useState<{ titulo: string; msg: string } | null>(null);
+  const [confirmaApagarMassa, setConfirmaApagarMassa] = useState(false);
+  const chaveLote = (l: any) => `${l.filtro_producao}||${l.grafica}`;
+
+  // Seleção de kits na Fila de Montagem (por id_codigo_kit)
+  const [kitsSelecionados, setKitsSelecionados] = useState<string[]>([]);
+  const [confirmaApagarKits, setConfirmaApagarKits] = useState(false);
+
   const toggleSecao = (secao: string) => { 
     setSecoes(prev => ({ ...prev, [secao]: !prev[secao as keyof typeof secoes] })); 
   };
@@ -161,9 +174,10 @@ export default function CalculoKits() {
           }
         }
         setKits(Array.from(porKit.values()));
+        setKitsSelecionados(prev => (loteEscolhido === filtroProducao && graficaEscolhida === grafica) ? prev : []);
         setEtapa(2);
       } else {
-        alert("Nenhum Kit importado encontrado para este lote.");
+        setAviso({ titulo: 'Lote sem kits', msg: 'Nenhum kit importado foi encontrado para este lote.' });
       }
     } catch(e) { console.error(e); }
   };
@@ -179,7 +193,7 @@ export default function CalculoKits() {
     const tiragemProduzida = Math.round(tiragemBruta + 50 + (tiragemBruta * 0.02)); // Quebra padrão para kit
     
     const velNominal = Number(maquina.produtividade_unit) || 1;
-    const setupUnitario = timeToDecimal(maquina.setup || '00:00');
+    const setupUnitario = timeToDecimal((maquina.setup || '00:00'));
 
     const qntSkus = Number(infoKit.qnt_skus || 1);
     const espessura = Number(String(infoKit.espessura_kit_mm || '0').replace(',', '.'));
@@ -191,10 +205,11 @@ export default function CalculoKits() {
     const velReal = Math.round(velNominal * (1 - penalidadeTotal));
 
     const rodagemDec = tiragemProduzida / (velReal || 1);
-    const totalDec = setupUnitario + rodagemDec;
+    const freteDec = freteDe(maquina);
+    const totalDec = setupUnitario + freteDec + rodagemDec;
 
     return {
-      maquinaSetupStr: maquina.setup || '00:00',
+      maquinaSetupStr: (maquina.setup || '00:00'),
       parametros: {
         velNominal,
         velReal,
@@ -202,7 +217,7 @@ export default function CalculoKits() {
         tiragemProduzida
       },
       totais: {
-        setup: decimalToTime(setupUnitario),
+        setup: decimalToTime(setupUnitario + freteDec),
         rodagem: decimalToTime(rodagemDec),
         total: decimalToTime(totalDec)
       }
@@ -245,7 +260,7 @@ export default function CalculoKits() {
     });
 
     if (alvos.length === 0) {
-      alert("Nenhum Kit atende aos filtros selecionados.");
+      setAviso({ titulo: 'Nada para calcular', msg: 'Nenhum kit atende aos filtros selecionados.' });
       return;
     }
 
@@ -283,6 +298,48 @@ export default function CalculoKits() {
     if (!cancelarRoboRef.current) setProgressoRobo(p => ({ ...p, status: 'concluido', atual: count }));
   };
 
+  // Calcula (ou recalcula) / apaga apenas os kits marcados na fila
+  const executarSelecionados = async (modo: 'calcular' | 'apagar') => {
+    setConfirmaApagarKits(false);
+    const alvos = kits.filter(k => kitsSelecionados.includes(k.id_codigo_kit) && (modo === 'calcular' || k.dados_calculo != null));
+    if (alvos.length === 0) {
+      setAviso({ titulo: modo === 'calcular' ? 'Nada para calcular' : 'Nada para apagar', msg: modo === 'calcular' ? 'Nenhum kit selecionado.' : 'Os kits selecionados não têm cálculo.' });
+      return;
+    }
+
+    const tipoLabel = modo === 'calcular' ? 'Calculando' : 'Apagando';
+    setModalRobo(true);
+    setProgressoRobo({ atual: 0, total: alvos.length, status: 'processando', tipo: tipoLabel });
+    cancelarRoboRef.current = false;
+
+    const mqBox = robo.encaixotamento ? maquinasCarregadas.find(m => String(m.id) === robo.encaixotamento) : getMaquinaMaisRapida('Encaixotamento', 'Acabamento');
+    const mqShrink = robo.shrink ? maquinasCarregadas.find(m => String(m.id) === robo.shrink) : getMaquinaMaisRapida('Shrink', 'Seladora');
+
+    let feitos = 0;
+    for (let i = 0; i < alvos.length; i++) {
+      if (cancelarRoboRef.current) { setProgressoRobo(p => ({ ...p, status: 'cancelado' })); return; }
+      const item = alvos[i];
+      let dados_calculo: any = null;
+      if (modo === 'calcular') {
+        const resBox = calcularOperacaoKit(mqBox, item, false);
+        const resShrink = calcularOperacaoKit(mqShrink, item, true);
+        dados_calculo = {
+          encaixotamento: resBox && mqBox ? { maquina_id: mqBox.id, resultado: resBox } : null,
+          shrink: resShrink && mqShrink ? { maquina_id: mqShrink.id, resultado: resShrink } : undefined
+        };
+      }
+      try {
+        const r = await fetch('/api/producao/kits/salvar-calculo', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id_codigo_kit: item.id_codigo_kit, filtro_producao: filtroProducao, grafica, dados_calculo })
+        });
+        if (r.ok) feitos++;
+      } catch (e) {}
+      setProgressoRobo({ atual: i + 1, total: alvos.length, status: 'processando', tipo: tipoLabel });
+    }
+    setProgressoRobo({ atual: feitos, total: alvos.length, status: 'concluido', tipo: modo === 'calcular' ? 'Cálculo' : 'Limpeza' });
+  };
+
   const limparCalculosDaFila = async () => {
     const calculadosRaw = kits.filter(k => k.dados_calculo != null);
     const alvosLimpeza = calculadosRaw.filter(k => {
@@ -318,6 +375,85 @@ export default function CalculoKits() {
     if (!cancelarRoboRef.current) { setProgressoRobo(prev => ({ ...prev, status: 'concluido', atual: limpos })); }
   };
 
+  const executarEmMassa = async (modo: 'calcular' | 'apagar') => {
+    const lotesAlvo = lotesDisponiveis.filter(l => lotesSelecionados.includes(chaveLote(l)));
+    if (lotesAlvo.length === 0) return;
+    setConfirmaApagarMassa(false);
+
+    const tipoLabel = modo === 'calcular' ? 'Calculando' : 'Apagando';
+    setEmMassa(true);
+    setModalRobo(true);
+    setProgressoRobo({ atual: 0, total: 0, status: 'processando', tipo: tipoLabel });
+    cancelarRoboRef.current = false;
+
+    try {
+      const maquinasTodas: any[] = await fetch(`/api/maquinas?ts=${Date.now()}`).then(r => r.json());
+      const maisRapida = (lista: any[], tipo: string, sub: string) =>
+        lista
+          .filter(m => { const t = String(m.tipo || '').toLowerCase(); return t.includes(tipo) || t.includes(sub); })
+          .sort((a, b) => Number(b.produtividade_unit || 0) - Number(a.produtividade_unit || 0))[0] || null;
+
+      type Tarefa = { lote: any; kit: any };
+      const tarefas: Tarefa[] = [];
+      for (const lote of lotesAlvo) {
+        const res = await fetch(`/api/producao/kits?grafica=${lote.grafica}&filtro=${lote.filtro_producao}`);
+        const dados = await res.json();
+        if (!res.ok || !Array.isArray(dados)) continue;
+        const porKit = new Map<string, any>();
+        for (const linha of dados) {
+          const chave = String(linha.id_codigo_kit || '').trim().toUpperCase();
+          const existente = porKit.get(chave);
+          if (!existente || (!existente.dados_calculo && linha.dados_calculo)) porKit.set(chave, linha);
+        }
+        for (const kit of porKit.values()) {
+          const temCalculo = kit.dados_calculo != null;
+          if ((modo === 'calcular' && !temCalculo) || (modo === 'apagar' && temCalculo)) tarefas.push({ lote, kit });
+        }
+      }
+
+      if (tarefas.length === 0) {
+        setModalRobo(false);
+        setEmMassa(false);
+        setAviso({
+          titulo: modo === 'calcular' ? 'Nada para calcular' : 'Nada para apagar',
+          msg: modo === 'calcular' ? 'Os lotes selecionados não têm kits pendentes.' : 'Os lotes selecionados não têm kits com cálculo.'
+        });
+        return;
+      }
+
+      setProgressoRobo({ atual: 0, total: tarefas.length, status: 'processando', tipo: tipoLabel });
+      let feitos = 0;
+      for (let i = 0; i < tarefas.length; i++) {
+        if (cancelarRoboRef.current) { setProgressoRobo(p => ({ ...p, status: 'cancelado' })); return; }
+        const { lote, kit } = tarefas[i];
+        let dados_calculo: any = null;
+        if (modo === 'calcular') {
+          const maqLote = maquinasTodas.filter(m => m.ativo !== false && String(m.grafica || '').toUpperCase() === String(lote.grafica || '').toUpperCase());
+          const mqBox = maisRapida(maqLote, 'encaixotamento', 'acabamento');
+          const mqShrink = maisRapida(maqLote, 'shrink', 'seladora');
+          const resBox = calcularOperacaoKit(mqBox, kit, false);
+          const resShrink = calcularOperacaoKit(mqShrink, kit, true);
+          dados_calculo = {
+            encaixotamento: resBox && mqBox ? { maquina_id: mqBox.id, resultado: resBox } : null,
+            shrink: resShrink && mqShrink ? { maquina_id: mqShrink.id, resultado: resShrink } : undefined
+          };
+        }
+        try {
+          const r = await fetch('/api/producao/kits/salvar-calculo', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id_codigo_kit: kit.id_codigo_kit, filtro_producao: lote.filtro_producao, grafica: lote.grafica, dados_calculo })
+          });
+          if (r.ok) feitos++;
+        } catch (e) {}
+        setProgressoRobo({ atual: i + 1, total: tarefas.length, status: 'processando', tipo: tipoLabel });
+      }
+      setProgressoRobo({ atual: feitos, total: tarefas.length, status: 'concluido', tipo: modo === 'calcular' ? 'Cálculo' : 'Limpeza' });
+    } catch (e) {
+      console.error(e);
+      setProgressoRobo(p => ({ ...p, status: 'cancelado' }));
+    }
+  };
+
   // 🔴 1. VARIÁVEL DE FILTRAGEM DE GRÁFICA
   const lotesFiltrados = lotesDisponiveis.filter(l => 
     !filtroGraficaGlobal || String(l.grafica).toUpperCase() === filtroGraficaGlobal.toUpperCase()
@@ -336,6 +472,45 @@ export default function CalculoKits() {
           <div className="bg-white border-b-4 border-indigo-600 rounded-2xl shadow-2xl p-8 flex flex-col items-center max-w-sm">
             <i className="fas fa-check-circle text-[60px] text-indigo-500 mb-4 animate-pulse"></i>
             <h3 className="text-lg font-black text-slate-800 uppercase text-center tracking-wide">{feedback.msg}</h3>
+          </div>
+        </div>
+      )}
+
+      {aviso && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white border-b-4 border-amber-500 rounded-2xl shadow-2xl p-8 w-full max-w-[400px] text-center flex flex-col items-center">
+            <i className="fas fa-exclamation-circle text-[56px] text-amber-500 mb-4"></i>
+            <h3 className="text-lg font-black text-slate-800 uppercase tracking-wide mb-2">{aviso.titulo}</h3>
+            <p className="text-sm text-slate-600 font-medium mb-6">{aviso.msg}</p>
+            <button onClick={() => setAviso(null)} className="bg-slate-800 hover:bg-slate-700 text-white font-bold px-8 py-2.5 rounded-full uppercase text-sm transition-all">Entendi</button>
+          </div>
+        </div>
+      )}
+
+      {confirmaApagarMassa && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white border-b-4 border-red-600 rounded-2xl shadow-2xl p-8 w-full max-w-[420px] text-center flex flex-col items-center">
+            <i className="fas fa-eraser text-[56px] text-red-500 mb-4"></i>
+            <h3 className="text-lg font-black text-slate-800 uppercase tracking-wide mb-2">Apagar cálculos?</h3>
+            <p className="text-sm text-slate-600 font-medium mb-6">Todos os cálculos de kits de {lotesSelecionados.length} lote(s) selecionado(s) serão apagados. Essa ação não pode ser desfeita.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmaApagarMassa(false)} className="px-6 py-2.5 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-full">Cancelar</button>
+              <button onClick={() => executarEmMassa('apagar')} className="bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-2.5 rounded-full uppercase text-sm shadow-sm shadow-red-600/20 flex items-center gap-2 transition-all"><i className="fas fa-trash-alt"></i> Apagar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmaApagarKits && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white border-b-4 border-red-600 rounded-2xl shadow-2xl p-8 w-full max-w-[420px] text-center flex flex-col items-center">
+            <i className="fas fa-eraser text-[56px] text-red-500 mb-4"></i>
+            <h3 className="text-lg font-black text-slate-800 uppercase tracking-wide mb-2">Apagar cálculos?</h3>
+            <p className="text-sm text-slate-600 font-medium mb-6">Os cálculos dos {kitsSelecionados.length} kit(s) selecionado(s) serão apagados. Essa ação não pode ser desfeita.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmaApagarKits(false)} className="px-6 py-2.5 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-full">Cancelar</button>
+              <button onClick={() => executarSelecionados('apagar')} className="bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-2.5 rounded-full uppercase text-sm shadow-sm shadow-red-600/20 flex items-center gap-2 transition-all"><i className="fas fa-trash-alt"></i> Apagar</button>
+            </div>
           </div>
         </div>
       )}
@@ -359,7 +534,7 @@ export default function CalculoKits() {
             {progressoRobo.status === 'processando' ? (
               <button onClick={() => { cancelarRoboRef.current = true; }} className="border-2 border-red-500 text-red-500 font-bold px-6 py-2 rounded-full uppercase text-xs">Interromper</button>
             ) : (
-              <button onClick={() => { setModalRobo(false); carregarKitsDoLote(filtroProducao, grafica); carregarLotesIniciais(); }} className="bg-slate-800 text-white font-bold px-8 py-3 rounded-full uppercase text-sm">Fechar</button>
+              <button onClick={() => { setModalRobo(false); if (emMassa) { setEmMassa(false); setLotesSelecionados([]); } else { carregarKitsDoLote(filtroProducao, grafica); } carregarLotesIniciais(); }} className="bg-slate-800 text-white font-bold px-8 py-3 rounded-full uppercase text-sm">Fechar</button>
             )}
           </div>
         </div>
@@ -448,11 +623,36 @@ export default function CalculoKits() {
               </select>
             </header>
 
+            {lotesSelecionados.length > 0 && (
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4 p-3 bg-indigo-50 border border-indigo-200 rounded-xl shadow-sm">
+                <span className="text-sm font-bold text-indigo-900 flex-1">{lotesSelecionados.length} lote(s) selecionado(s)</span>
+                <button onClick={() => executarEmMassa('calcular')} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-lg text-xs uppercase tracking-wide flex items-center justify-center gap-2 shadow-sm transition-all">
+                  <i className="fas fa-magic"></i> Calcular Pendentes
+                </button>
+                <button onClick={() => setConfirmaApagarMassa(true)} className="border border-red-300 text-red-600 bg-white hover:bg-red-50 font-bold px-4 py-2 rounded-lg text-xs uppercase tracking-wide flex items-center justify-center gap-2 shadow-sm transition-all">
+                  <i className="fas fa-eraser"></i> Apagar Cálculos
+                </button>
+                <button onClick={() => setLotesSelecionados([])} className="text-xs font-bold text-slate-500 hover:bg-white px-3 py-2 rounded-lg">Limpar seleção</button>
+              </div>
+            )}
+
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto w-full">
               <table className="w-full text-left border-collapse text-sm min-w-[640px]">
                 <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold tracking-wider">
                   <tr>
-                    <th className="p-3 pl-4">Lote Operacional</th>
+                    <th className="p-3 pl-4 w-10">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 cursor-pointer"
+                        checked={lotesFiltrados.length > 0 && lotesFiltrados.every(l => lotesSelecionados.includes(chaveLote(l)))}
+                        onChange={(e) => {
+                          const chaves = lotesFiltrados.map(chaveLote);
+                          setLotesSelecionados(prev => e.target.checked ? Array.from(new Set([...prev, ...chaves])) : prev.filter(c => !chaves.includes(c)));
+                        }}
+                        title="Selecionar todos os lotes filtrados"
+                      />
+                    </th>
+                    <th className="p-3">Lote Operacional</th>
                     <th className="p-3">Gráfica Parceira</th>
                     <th className="p-3 text-center border-l border-slate-200 w-24">Total Projetos</th>
                     <th className="p-3 text-center w-24 text-emerald-700 bg-emerald-50/20">Calculados</th>
@@ -465,7 +665,15 @@ export default function CalculoKits() {
                     const pendentes = (l.total_skus || 0) - (l.skus_calculados || 0);
                     return (
                       <tr key={i} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="p-3 pl-4 font-mono font-bold text-slate-800">{l.filtro_producao}</td>
+                        <td className="p-3 pl-4">
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 cursor-pointer"
+                            checked={lotesSelecionados.includes(chaveLote(l))}
+                            onChange={() => setLotesSelecionados(prev => prev.includes(chaveLote(l)) ? prev.filter(c => c !== chaveLote(l)) : [...prev, chaveLote(l)])}
+                          />
+                        </td>
+                        <td className="p-3 font-mono font-bold text-slate-800">{l.filtro_producao}</td>
                         <td className="p-3 text-slate-600 uppercase text-xs font-bold">{l.grafica}</td>
                         <td className="p-3 text-center border-l border-slate-200 font-mono text-slate-700">{l.total_skus}</td>
                         <td className="p-3 text-center font-mono font-bold text-emerald-700 bg-emerald-50/10">{l.skus_calculados}</td>
@@ -664,10 +872,32 @@ export default function CalculoKits() {
               </div>
             )}
 
+            {kitsSelecionados.length > 0 && (
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4 p-3 bg-indigo-50 border border-indigo-200 rounded-xl shadow-sm">
+                <span className="text-sm font-bold text-indigo-900 flex-1">{kitsSelecionados.length} kit(s) selecionado(s)</span>
+                <button onClick={() => executarSelecionados('calcular')} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-lg text-xs uppercase tracking-wide flex items-center justify-center gap-2 shadow-sm transition-all">
+                  <i className="fas fa-magic"></i> Calcular Selecionados
+                </button>
+                <button onClick={() => setConfirmaApagarKits(true)} className="border border-red-300 text-red-600 bg-white hover:bg-red-50 font-bold px-4 py-2 rounded-lg text-xs uppercase tracking-wide flex items-center justify-center gap-2 shadow-sm transition-all">
+                  <i className="fas fa-eraser"></i> Apagar Cálculos
+                </button>
+                <button onClick={() => setKitsSelecionados([])} className="text-xs font-bold text-slate-500 hover:bg-white px-3 py-2 rounded-lg">Limpar seleção</button>
+              </div>
+            )}
+
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
               <table className="w-full text-left border-collapse text-sm whitespace-nowrap min-w-[900px]">
                 <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold tracking-wider">
                   <tr>
+                    <th className="p-3 pl-4 w-10">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 cursor-pointer"
+                        checked={kits.length > 0 && kits.every(k => kitsSelecionados.includes(k.id_codigo_kit))}
+                        onChange={(e) => setKitsSelecionados(e.target.checked ? kits.map(k => k.id_codigo_kit) : [])}
+                        title="Selecionar todos os kits"
+                      />
+                    </th>
                     <th className="p-3 pl-4 w-12 text-center">Abrir</th>
                     <th className="p-3 w-32">Código Kit</th>
                     <th className="p-3">Descrição Comercial</th>
@@ -700,6 +930,14 @@ export default function CalculoKits() {
                         
                         setEtapa(3);
                       }}>
+                        <td className="p-3 pl-4" onClick={e => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 cursor-pointer"
+                            checked={kitsSelecionados.includes(k.id_codigo_kit)}
+                            onChange={() => setKitsSelecionados(prev => prev.includes(k.id_codigo_kit) ? prev.filter(c => c !== k.id_codigo_kit) : [...prev, k.id_codigo_kit])}
+                          />
+                        </td>
                         <td className="p-3 pl-4 text-center text-slate-400 group-hover:text-indigo-600"><i className="fas fa-arrow-right"></i></td>
                         <td className="p-3 font-mono font-bold text-slate-800">{k.id_codigo_kit}</td>
                         <td className="p-3 truncate max-w-[200px]" title={k.id_descricao_kit}>{k.id_descricao_kit}</td>

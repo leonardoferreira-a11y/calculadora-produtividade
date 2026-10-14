@@ -16,6 +16,462 @@ function obterSetorPertencente(tipo: string, etapa: string): string {
   return 'Acabamentos Finais';
 }
 
+// ---------------------------------------------------------------------------
+// RESUMO EXECUTIVO
+// Processado EXCLUSIVAMENTE a partir das tarefas já resolvidas/agendadas que estão
+// em memória no momento do clique (snapshot). Nunca dispara recálculo no backend.
+// ---------------------------------------------------------------------------
+const HORA_MS = 3600 * 1000;
+const DIA_MS = 24 * HORA_MS;
+const LIMIARES_RESUMO = {
+  folgaMinimaEntregaH: 48,        // término a menos disso da data de entrega = risco
+  diasImpressaoMesmaMaquina: 5,   // lote ocupando a mesma impressora por mais dias corridos que isso
+  diasFluxoOcioso: 3,             // espera entre etapas acima disso = fluxo ocioso
+  ocupacaoAlta: 0.85,             // máquina acima disso da capacidade útil no período = gargalo
+  ocupacaoBaixa: 0.3,             // máquina abaixo disso = capacidade ociosa
+};
+
+type JanelaResumo = { inicio: number; fim: number };
+type ImpressoraLote = { maquinaId: string; nome: string; janela: JanelaResumo; horas: number; skus: number };
+type ResumoLote = {
+  lote: string; qtdSkus: number; qtdKits: number; tiragemTotal: number; skusSemTiragem: number;
+  impressao: JanelaResumo | null; acabamento: JanelaResumo | null; kit: JanelaResumo | null; terminoGeral: number;
+  impressoras: ImpressoraLote[];
+  maiorEsperaImpAcab: { sku: string; ms: number } | null;
+};
+type InsightResumo = { nivel: 'CRITICO' | 'ATENCAO' | 'INFO'; texto: string };
+type MaquinaResumo = { nome: string; setor: string; diasTrabalho: number; horasDiarias: number; unidadesEmUso: number; modo: string };
+type SnapshotResumo = {
+  tarefas: any[]; geradoEm: Date; grafica: string; ordemLotes: string[];
+  maquinas: Record<string, MaquinaResumo>; travas: any[];
+};
+
+const etapaDoResumo = (t: any): 'IMPRESSAO' | 'ACABAMENTO' | 'KIT' => {
+  const setor = obterSetorPertencente(t.maq_tipo, t.nome_etapa);
+  if (setor === 'Impressão') return 'IMPRESSAO';
+  if (setor === 'Formação de Kit') return 'KIT';
+  return 'ACABAMENTO';
+};
+
+const expandirJanela = (j: JanelaResumo | null, ini: number, fim: number): JanelaResumo =>
+  j ? { inicio: Math.min(j.inicio, ini), fim: Math.max(j.fim, fim) } : { inicio: ini, fim };
+
+// Aceita número, "1500.00" (numeric do PG) ou "1.500" (milhar pt-BR).
+function parseTiragem(v: any): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  let s = String(v ?? '').trim();
+  if (!s || s.toUpperCase() === 'N/A') return null;
+  s = /^\d{1,3}(\.\d{3})+(,\d+)?$/.test(s) ? s.replace(/\./g, '').replace(',', '.') : s.replace(',', '.');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+function extrairResumoPorLote(tarefas: any[], maquinas: Record<string, MaquinaResumo>, ordemLotes: string[]): ResumoLote[] {
+  const porLote = new Map<string, any[]>();
+  for (const t of tarefas) {
+    const lote = String(t.filtro_producao || 'S/ Lote');
+    if (!porLote.has(lote)) porLote.set(lote, []);
+    porLote.get(lote)!.push(t);
+  }
+
+  const resumos = Array.from(porLote.entries()).map(([lote, lista]): ResumoLote => {
+    const tiragemPorSku = new Map<string, number | null>();
+    const kits = new Set<string>();
+    const porMaquina = new Map<string, { janela: JanelaResumo | null; horas: number; skus: Set<string> }>();
+    const fimImpPorSku = new Map<string, number>();
+    const iniAcabPorSku = new Map<string, number>();
+    let impressao: JanelaResumo | null = null, acabamento: JanelaResumo | null = null, kit: JanelaResumo | null = null;
+    let terminoGeral = 0;
+
+    for (const t of lista) {
+      const ini = new Date(t.data_inicio).getTime();
+      const fim = new Date(t.data_fim).getTime();
+      if (!Number.isFinite(ini) || !Number.isFinite(fim)) continue;
+      const sku = String(t.sku_alvo);
+      terminoGeral = Math.max(terminoGeral, fim);
+      const etapa = etapaDoResumo(t);
+
+      if (etapa === 'KIT') { kits.add(sku); kit = expandirJanela(kit, ini, fim); continue; }
+      if (!tiragemPorSku.has(sku) || tiragemPorSku.get(sku) === null) tiragemPorSku.set(sku, parseTiragem(t.dados_tooltip?.tiragem));
+
+      if (etapa === 'IMPRESSAO') {
+        impressao = expandirJanela(impressao, ini, fim);
+        fimImpPorSku.set(sku, Math.max(fimImpPorSku.get(sku) ?? 0, fim));
+        const mqId = String(t.maquina_id).trim();
+        const reg = porMaquina.get(mqId) || { janela: null, horas: 0, skus: new Set<string>() };
+        reg.janela = expandirJanela(reg.janela, ini, fim);
+        reg.horas += Number(t.tempo_producao_efetivo) || 0;
+        reg.skus.add(sku);
+        porMaquina.set(mqId, reg);
+      } else {
+        acabamento = expandirJanela(acabamento, ini, fim);
+        iniAcabPorSku.set(sku, Math.min(iniAcabPorSku.get(sku) ?? Infinity, ini));
+      }
+    }
+
+    let maiorEsperaImpAcab: ResumoLote['maiorEsperaImpAcab'] = null;
+    fimImpPorSku.forEach((fimImp, sku) => {
+      const iniAcab = iniAcabPorSku.get(sku);
+      if (iniAcab === undefined) return;
+      const espera = iniAcab - fimImp;
+      if (espera > 0 && (!maiorEsperaImpAcab || espera > maiorEsperaImpAcab.ms)) maiorEsperaImpAcab = { sku, ms: espera };
+    });
+
+    const tiragens = Array.from(tiragemPorSku.values());
+    return {
+      lote,
+      qtdSkus: tiragemPorSku.size,
+      qtdKits: kits.size,
+      tiragemTotal: tiragens.reduce((acc: number, v) => acc + (v ?? 0), 0),
+      skusSemTiragem: tiragens.filter(v => v === null).length,
+      impressao, acabamento, kit, terminoGeral,
+      impressoras: Array.from(porMaquina.entries())
+        .map(([maquinaId, r]) => ({ maquinaId, nome: maquinas[maquinaId]?.nome || maquinaId, janela: r.janela!, horas: r.horas, skus: r.skus.size }))
+        .sort((a, b) => b.horas - a.horas),
+      maiorEsperaImpAcab,
+    };
+  });
+
+  const posicao = (l: string) => { const i = ordemLotes.indexOf(l); return i === -1 ? Number.MAX_SAFE_INTEGER : i; };
+  return resumos.sort((a, b) => posicao(a.lote) - posicao(b.lote) || a.lote.localeCompare(b.lote));
+}
+
+const fmtDataHoraResumo = (ms: number) => {
+  const d = new Date(ms);
+  return `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+};
+// Dias sempre arredondados para cima (5,2 dias → 6 dias); abaixo de 1 dia, horas inteiras para cima.
+const fmtDiasResumo = (dias: number) => { const d = Math.max(1, Math.ceil(dias - 1e-9)); return `${d} dia${d === 1 ? '' : 's'}`; };
+const fmtDuracaoResumo = (ms: number) => {
+  const abs = Math.abs(ms);
+  return abs < DIA_MS ? `${Math.ceil(abs / HORA_MS - 1e-9)}h` : fmtDiasResumo(abs / DIA_MS);
+};
+const fmtHorasResumo = (h: number) => `${fmtNumResumo(Math.round(h))}h`;
+const fmtDiaMesResumo = (ms: number) => { const d = new Date(ms); return `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}`; };
+const diaIsoResumo = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+const fmtJanelaResumo = (j: JanelaResumo | null) => j ? `${fmtDataHoraResumo(j.inicio)} → ${fmtDataHoraResumo(j.fim)} (${fmtDuracaoResumo(j.fim - j.inicio)})` : '—';
+const fmtNumResumo = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+
+function gerarInsightsLote(r: ResumoLote, entregaMs: number | null, maquinas: Record<string, MaquinaResumo>): InsightResumo[] {
+  const L = LIMIARES_RESUMO;
+  const out: InsightResumo[] = [];
+
+  // Risco de atraso — data de entrega (opcional, informada no modal)
+  if (entregaMs !== null) {
+    const folga = entregaMs - r.terminoGeral;
+    if (folga < 0) out.push({ nivel: 'CRITICO', texto: `Risco de atraso: o lote termina ${fmtDuracaoResumo(folga)} DEPOIS da data de entrega (${fmtDataHoraResumo(entregaMs)}).` });
+    else if (folga < L.folgaMinimaEntregaH * HORA_MS) out.push({ nivel: 'ATENCAO', texto: `Risco de atraso: folga de apenas ${fmtDuracaoResumo(folga)} entre o término do lote e a entrega.` });
+  }
+
+  // Formação de kits pode começar antes do fim do acabamento (comportamento normal): só
+  // vira risco via data de entrega (término geral inclui o kit). Aqui, só fluxo ocioso.
+  if (r.acabamento && r.kit) {
+    const folgaAcabKit = r.kit.inicio - r.acabamento.fim;
+    if (folgaAcabKit > L.diasFluxoOcioso * DIA_MS) {
+      out.push({ nivel: 'ATENCAO', texto: `Fluxo ocioso: ${fmtDuracaoResumo(folgaAcabKit)} parados entre o fim do acabamento e o início da formação de kits.` });
+    }
+  }
+
+  // Gargalo de máquina — só quando a janela do lote é longa E a máquina está de fato
+  // saturada nela. Janela longa com poucas horas efetivas = tarefas espaçadas (liberação
+  // de arquivo/tiragem); a máquina fica livre para outros trabalhos, então não é gargalo.
+  for (const imp of r.impressoras) {
+    const dias = (imp.janela.fim - imp.janela.inicio) / DIA_MS;
+    if (dias < L.diasImpressaoMesmaMaquina) continue;
+    const m = maquinas[imp.maquinaId];
+    const capacidadeH = m ? dias * (m.diasTrabalho / 7) * m.horasDiarias * Math.max(1, m.unidadesEmUso) : 0;
+    const ocup = capacidadeH > 0 ? imp.horas / capacidadeH : 0;
+    if (ocup < L.ocupacaoAlta) continue;
+    out.push({
+      nivel: ocup >= 1 ? 'CRITICO' : 'ATENCAO',
+      texto: `Gargalo de máquina: "${imp.nome}" fica ${fmtDiasResumo(dias)} corridos imprimindo este lote com ${fmtPctResumo(ocup)} da capacidade da janela (${fmtHorasResumo(imp.horas)} efetivas, ${imp.skus} SKU${imp.skus === 1 ? '' : 's'}).`,
+    });
+  }
+
+  // Fluxo ocioso — impressão × acabamento
+  if (r.impressao && r.acabamento) {
+    const buraco = r.acabamento.inicio - r.impressao.fim;
+    if (buraco > L.diasFluxoOcioso * DIA_MS) {
+      out.push({ nivel: 'ATENCAO', texto: `Fluxo ocioso: ${fmtDuracaoResumo(buraco)} entre o fim da impressão e o início do acabamento do lote.` });
+    }
+  }
+  if (r.maiorEsperaImpAcab && r.maiorEsperaImpAcab.ms > L.diasFluxoOcioso * DIA_MS) {
+    out.push({ nivel: 'INFO', texto: `Fluxo ocioso: o SKU ${r.maiorEsperaImpAcab.sku} espera ${fmtDuracaoResumo(r.maiorEsperaImpAcab.ms)} entre sair da impressão e entrar no acabamento (maior espera do lote).` });
+  }
+
+  if (r.skusSemTiragem > 0) out.push({ nivel: 'INFO', texto: `${r.skusSemTiragem} SKU(s) sem tiragem informada — fora da soma de tiragem.` });
+  return out;
+}
+
+// --- Ocupação do parque e calendário (travas/feriados) ------------------------
+const upResumo = (s: any) => String(s ?? '').toUpperCase().trim();
+const inicioDiaResumo = (ms: number) => { const d = new Date(ms); d.setUTCHours(0, 0, 0, 0); return d.getTime(); };
+const diaTravaResumo = (tv: any) => Date.parse(`${String(tv.data_alvo).slice(0, 10)}T00:00:00Z`);
+
+function indexarTravasResumo(travas: any[]) {
+  const idx = new Map<string, any>();
+  for (const tv of travas) idx.set(`${upResumo(tv.maquina_id)}_${String(tv.data_alvo).slice(0, 10)}`, tv);
+  return idx;
+}
+
+// Mesma regra do backend (simularJanelaDeTrabalho): fim de semana pelo regime da
+// máquina; depois trava específica da máquina > trava TODAS > horas_diarias.
+function capacidadeDiaResumo(mqId: string, mq: MaquinaResumo, diaMs: number, travasIdx: Map<string, any>): number {
+  const dow = new Date(diaMs).getUTCDay();
+  if ((mq.diasTrabalho === 5 && (dow === 0 || dow === 6)) || (mq.diasTrabalho === 6 && dow === 0)) return 0;
+  const dia = diaIsoResumo(diaMs);
+  const trava = travasIdx.get(`${upResumo(mqId)}_${dia}`) || travasIdx.get(`TODAS_${dia}`);
+  if (trava) return trava.status_operacional === 'INATIVO' ? 0 : Math.min(24, Math.max(0, Number(trava.horas_disponiveis) || 0));
+  return Math.min(24, mq.horasDiarias);
+}
+
+// Agrupa dias parados consecutivos; dias de folga (fim de semana/feriado) no meio não quebram a faixa.
+type StatusDia = 'PARADO' | 'OCUPADO' | 'FOLGA';
+function faixasParadas(dias: number[], status: StatusDia[]): string[] {
+  const faixas: string[] = [];
+  let ini: number | null = null, fim: number | null = null;
+  const fechar = () => { if (ini !== null && fim !== null) faixas.push(ini === fim ? fmtDiaMesResumo(ini) : `${fmtDiaMesResumo(ini)}–${fmtDiaMesResumo(fim)}`); ini = fim = null; };
+  status.forEach((s, i) => {
+    if (s === 'PARADO') { if (ini === null) ini = dias[i]; fim = dias[i]; }
+    else if (s === 'OCUPADO') fechar();
+  });
+  fechar();
+  return faixas;
+}
+const listarFaixas = (faixas: string[], max = 5) => faixas.length <= max ? faixas.join(', ') : `${faixas.slice(0, max).join(', ')} e +${faixas.length - max}`;
+
+const SETORES_RESUMO = ['Impressão', 'Beneficiamento', 'Empastamento', 'Dobra', 'Corte e Vinco', 'Alceadeira', 'Acabamentos Finais', 'Formação de Kit'];
+
+type OcupacaoMaquina = {
+  id: string; nome: string; setor: string; unidades: number;
+  horasOcupadas: number; horasUteis: number; pct: number;
+  diasUteis: number; paradosAntes: number; paradosMeio: number; paradosDepois: number;
+  faixasMeio: string[]; primeiraTarefa: number; ultimaTarefa: number;
+};
+type OcupacaoParque = { janela: JanelaResumo; dias: number[]; maquinas: OcupacaoMaquina[]; diasGraficaParada: number; faixasGraficaParada: string[] };
+
+// Janela = da primeira impressão até o fim da última tarefa. Capacidade útil =
+// horas de turno × unidades em uso, descontando fins de semana e travas.
+// Ocupação = horas-máquina programadas (horas efetivas × unidades ocupadas pela tarefa).
+function calcularOcupacaoParque(snap: SnapshotResumo): OcupacaoParque | null {
+  const tarefas = snap.tarefas
+    .map(t => ({ t, ini: new Date(t.data_inicio).getTime(), fim: new Date(t.data_fim).getTime() }))
+    .filter(x => Number.isFinite(x.ini) && Number.isFinite(x.fim) && x.fim > x.ini);
+  if (tarefas.length === 0) return null;
+
+  const impressoes = tarefas.filter(x => etapaDoResumo(x.t) === 'IMPRESSAO');
+  const inicio = (impressoes.length > 0 ? impressoes : tarefas).reduce((m, x) => Math.min(m, x.ini), Infinity);
+  const fim = tarefas.reduce((m, x) => Math.max(m, x.fim), 0);
+  const dias: number[] = [];
+  for (let d = inicioDiaResumo(inicio); d <= fim && dias.length < 400; d += DIA_MS) dias.push(d);
+  const travasIdx = indexarTravasResumo(snap.travas);
+
+  const porMaquina = new Map<string, typeof tarefas>();
+  for (const x of tarefas) {
+    const id = String(x.t.maquina_id).trim();
+    if (!porMaquina.has(id)) porMaquina.set(id, []);
+    porMaquina.get(id)!.push(x);
+  }
+
+  const graficaTemTurno = dias.map(() => false);
+  const graficaOcupada = dias.map(() => false);
+
+  const maquinas = Array.from(porMaquina.entries()).map(([id, lista]): OcupacaoMaquina => {
+    const t0 = lista[0].t;
+    const mq: MaquinaResumo = snap.maquinas[id] || { nome: String(t0.maq_modelo || id), setor: obterSetorPertencente(t0.maq_tipo, t0.nome_etapa), diasTrabalho: 5, horasDiarias: 24, unidadesEmUso: 1, modo: 'DILUIR' };
+    // Unidades em uso: o que o backend usou no cálculo (se disponível) ou a simulação da tela.
+    const unidadesBackend = lista.reduce((m, x) => Math.max(m, Number(x.t.unidades_em_uso) || 0), 0);
+    const unidades = unidadesBackend > 0 ? unidadesBackend : Math.max(1, mq.unidadesEmUso);
+
+    let horasOcupadas = 0;
+    for (const x of lista) {
+      const ocupadas = Number(x.t.unidades_ocupadas) || (mq.modo === 'DILUIR' ? unidades : 1);
+      const fracaoNaJanela = (Math.min(x.fim, fim) - Math.max(x.ini, inicio)) / (x.fim - x.ini);
+      horasOcupadas += (Number(x.t.tempo_producao_efetivo) || 0) * ocupadas * Math.max(0, Math.min(1, fracaoNaJanela));
+    }
+
+    const caps = dias.map(d => capacidadeDiaResumo(id, mq, d, travasIdx));
+    let horasUteis = 0;
+    caps.forEach((cap, i) => {
+      const turnoIni = dias[i], turnoFim = dias[i] + cap * HORA_MS;
+      horasUteis += Math.max(0, Math.min(turnoFim, fim) - Math.max(turnoIni, inicio)) / HORA_MS * unidades;
+    });
+
+    const ocupado = dias.map(() => false);
+    for (const x of lista) {
+      for (let i = Math.max(0, Math.floor((inicioDiaResumo(x.ini) - dias[0]) / DIA_MS)); i < dias.length && dias[i] < x.fim; i++) {
+        if (caps[i] > 0 && x.ini < dias[i] + caps[i] * HORA_MS && x.fim > dias[i]) ocupado[i] = true;
+      }
+    }
+    const status: StatusDia[] = caps.map((cap, i) => cap <= 0 ? 'FOLGA' : ocupado[i] ? 'OCUPADO' : 'PARADO');
+    status.forEach((s, i) => { if (s !== 'FOLGA') graficaTemTurno[i] = true; if (s === 'OCUPADO') graficaOcupada[i] = true; });
+
+    const primeiraTarefa = lista.reduce((m, x) => Math.min(m, x.ini), Infinity);
+    const ultimaTarefa = lista.reduce((m, x) => Math.max(m, x.fim), 0);
+    const iPrimeiro = status.findIndex(s => s === 'OCUPADO');
+    const iUltimo = status.length - 1 - [...status].reverse().findIndex(s => s === 'OCUPADO');
+    const contar = (de: number, ate: number) => status.slice(de, ate).filter(s => s === 'PARADO').length;
+    const temOcupado = iPrimeiro !== -1;
+
+    return {
+      id, nome: mq.nome, setor: mq.setor, unidades,
+      horasOcupadas, horasUteis, pct: horasUteis > 0 ? horasOcupadas / horasUteis : 0,
+      diasUteis: status.filter(s => s !== 'FOLGA').length,
+      paradosAntes: temOcupado ? contar(0, iPrimeiro) : contar(0, status.length),
+      paradosMeio: temOcupado ? contar(iPrimeiro, iUltimo + 1) : 0,
+      paradosDepois: temOcupado ? contar(iUltimo + 1, status.length) : 0,
+      faixasMeio: temOcupado ? faixasParadas(dias.slice(iPrimeiro, iUltimo + 1), status.slice(iPrimeiro, iUltimo + 1)) : [],
+      primeiraTarefa, ultimaTarefa,
+    };
+  });
+
+  const statusGrafica: StatusDia[] = dias.map((_, i) => !graficaTemTurno[i] ? 'FOLGA' : graficaOcupada[i] ? 'OCUPADO' : 'PARADO');
+  const ordemSetor = (s: string) => { const i = SETORES_RESUMO.indexOf(s); return i === -1 ? 99 : i; };
+  maquinas.sort((a, b) => ordemSetor(a.setor) - ordemSetor(b.setor) || b.pct - a.pct);
+
+  return {
+    janela: { inicio, fim }, dias, maquinas,
+    diasGraficaParada: statusGrafica.filter(s => s === 'PARADO').length,
+    faixasGraficaParada: faixasParadas(dias, statusGrafica),
+  };
+}
+
+// Travas/feriados que caem no período da produção, agrupados em faixas de dias consecutivos.
+function resumirTravasNoPeriodo(snap: SnapshotResumo, janela: JanelaResumo): string[] {
+  const iniDia = inicioDiaResumo(janela.inicio), fimDia = inicioDiaResumo(janela.fim);
+  const travas = snap.travas
+    .map(tv => ({ tv, dia: diaTravaResumo(tv) }))
+    .filter(x => Number.isFinite(x.dia) && x.dia >= iniDia && x.dia <= fimDia)
+    .sort((a, b) => a.dia - b.dia);
+
+  // 1) Faixas consecutivas por máquina + motivo + regra
+  type Faixa = { ini: number; fim: number; maquina: string; motivo: string; inativo: boolean; horas: number };
+  const abertas = new Map<string, Faixa>();
+  const faixas: Faixa[] = [];
+  for (const { tv, dia } of travas) {
+    const inativo = tv.status_operacional === 'INATIVO';
+    const horas = inativo ? 0 : Number(tv.horas_disponiveis) || 0;
+    const chave = `${upResumo(tv.maquina_id)}|${String(tv.motivo || '').trim()}|${inativo}|${horas}`;
+    const f = abertas.get(chave);
+    if (f && dia - f.fim <= DIA_MS) { f.fim = dia; continue; }
+    const nova = { ini: dia, fim: dia, maquina: upResumo(tv.maquina_id), motivo: String(tv.motivo || '').trim(), inativo, horas };
+    abertas.set(chave, nova); faixas.push(nova);
+  }
+
+  // 2) Mesma faixa/motivo/regra em várias máquinas vira uma linha só
+  const linhas = new Map<string, { f: Faixa; maquinas: string[] }>();
+  for (const f of faixas) {
+    const chave = `${f.ini}|${f.fim}|${f.motivo}|${f.inativo}|${f.horas}`;
+    const nome = f.maquina === 'TODAS' ? 'TODAS' : (snap.maquinas[f.maquina]?.nome || Object.entries(snap.maquinas).find(([id]) => upResumo(id) === f.maquina)?.[1].nome || f.maquina);
+    if (!linhas.has(chave)) linhas.set(chave, { f, maquinas: [] });
+    linhas.get(chave)!.maquinas.push(nome);
+  }
+
+  return Array.from(linhas.values()).map(({ f, maquinas }) => {
+    const qtd = Math.round((f.fim - f.ini) / DIA_MS) + 1;
+    const periodo = f.ini === f.fim ? fmtDiaMesResumo(f.ini) : `${fmtDiaMesResumo(f.ini)} a ${fmtDiaMesResumo(f.fim)}`;
+    const escopo = maquinas.includes('TODAS') ? 'toda a gráfica' : maquinas.map(n => `"${n}"`).join(', ');
+    const efeito = f.inativo ? 'sem trabalho previsto' : `capacidade reduzida para ${f.horas}h/dia`;
+    return `${periodo} (${fmtDiasResumo(qtd)}) — ${efeito} em ${escopo}${f.motivo ? ` devido a: ${f.motivo}` : ''}.`;
+  });
+}
+
+const fmtPctResumo = (p: number) => `${Math.round(p * 100)}%`;
+
+const ICONE_NIVEL: Record<InsightResumo['nivel'], string> = { CRITICO: '🔴', ATENCAO: '🟡', INFO: 'ℹ️' };
+
+function montarResumoExecutivo(snap: SnapshotResumo, entregaMs: number | null): string {
+  const resumos = extrairResumoPorLote(snap.tarefas, snap.maquinas, snap.ordemLotes);
+  const ocupacao = calcularOcupacaoParque(snap);
+  const linhas: string[] = [];
+  const totalSkus = resumos.reduce((a, r) => a + r.qtdSkus, 0);
+  const totalTiragem = resumos.reduce((a, r) => a + r.tiragemTotal, 0);
+  const terminoFinal = resumos.reduce((a, r) => Math.max(a, r.terminoGeral), 0);
+  const geradoEm = snap.geradoEm.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  linhas.push(`RESUMO EXECUTIVO — ${snap.grafica}`);
+  linhas.push(`Gerado em ${geradoEm} a partir de ${fmtNumResumo(snap.tarefas.length)} tarefas já agendadas em tela (sem recálculo).`);
+  if (entregaMs !== null) linhas.push(`Data de entrega considerada: ${fmtDataHoraResumo(entregaMs)}`);
+  linhas.push('');
+  linhas.push(`Lotes: ${resumos.length} · SKUs: ${fmtNumResumo(totalSkus)} · Tiragem total: ${fmtNumResumo(totalTiragem)}`);
+  if (terminoFinal > 0) linhas.push(`Término geral da gráfica: ${fmtDataHoraResumo(terminoFinal)}`);
+
+  const contagem = { CRITICO: 0, ATENCAO: 0, INFO: 0 };
+
+  if (ocupacao) {
+    const { janela, maquinas } = ocupacao;
+    const qtdDias = ocupacao.dias.length;
+
+    // Pontos de atenção iniciais: calendário (travas/feriados) e dias sem produção
+    linhas.push('');
+    linhas.push('═'.repeat(64));
+    linhas.push('PONTOS DE ATENÇÃO INICIAIS');
+    linhas.push('─'.repeat(64));
+    const travas = resumirTravasNoPeriodo(snap, janela);
+    if (travas.length === 0) linhas.push('  ✅ Nenhuma trava ou feriado cadastrado no período da produção.');
+    else travas.forEach(t => linhas.push(`  🏖️ ${t}`));
+    if (ocupacao.diasGraficaParada > 0) {
+      contagem.ATENCAO++;
+      linhas.push(`  🟡 Produção parada: ${ocupacao.diasGraficaParada} ${ocupacao.diasGraficaParada === 1 ? 'dia útil' : 'dias úteis'} sem nenhuma tarefa programada em toda a gráfica (${listarFaixas(ocupacao.faixasGraficaParada)}).`);
+    }
+
+    // Ocupação por máquina no período
+    linhas.push('');
+    linhas.push('═'.repeat(64));
+    linhas.push(`OCUPAÇÃO DO PARQUE — ${fmtDataHoraResumo(janela.inicio)} → ${fmtDataHoraResumo(janela.fim)} (${fmtDiasResumo(qtdDias)})`);
+    linhas.push('Período: da primeira impressão ao fim da produção. Capacidade útil = turno × unidades em uso,');
+    linhas.push('descontando fins de semana do regime e travas/feriados.');
+    linhas.push('─'.repeat(64));
+    let setorAtual = '';
+    for (const m of maquinas) {
+      if (m.setor !== setorAtual) { setorAtual = m.setor; linhas.push(''); linhas.push(`${setorAtual}`); }
+      const un = m.unidades > 1 ? ` (${m.unidades} un. em uso)` : '';
+      linhas.push(`• ${m.nome}${un}: ${fmtPctResumo(m.pct)} — ${fmtHorasResumo(m.horasOcupadas)} ocupadas de ${fmtHorasResumo(m.horasUteis)} úteis`);
+      const totalParados = m.paradosAntes + m.paradosMeio + m.paradosDepois;
+      if (totalParados > 0) {
+        const partes: string[] = [];
+        if (m.paradosAntes > 0) partes.push(`${m.paradosAntes} antes de começar em ${fmtDiaMesResumo(m.primeiraTarefa)}`);
+        if (m.paradosMeio > 0) partes.push(`${m.paradosMeio} entre tarefas (${listarFaixas(m.faixasMeio)})`);
+        if (m.paradosDepois > 0) partes.push(`${m.paradosDepois} após terminar em ${fmtDiaMesResumo(m.ultimaTarefa)}`);
+        linhas.push(`    Dias úteis parados: ${totalParados} de ${m.diasUteis} — ${partes.join('; ')}`);
+      } else {
+        linhas.push(`    Ocupada em todos os ${m.diasUteis} dias úteis do período.`);
+      }
+      if (m.pct >= LIMIARES_RESUMO.ocupacaoAlta) {
+        contagem.ATENCAO++;
+        linhas.push(`    🟡 Gargalo de máquina: operando a ${fmtPctResumo(m.pct)} da capacidade útil — pouca margem para absorver atrasos.`);
+      } else if (m.pct < LIMIARES_RESUMO.ocupacaoBaixa) {
+        contagem.INFO++;
+        linhas.push(`    ℹ️ Capacidade ociosa: só ${fmtPctResumo(m.pct)} da capacidade útil usada no período.`);
+      }
+    }
+  }
+
+  resumos.forEach((r, idx) => {
+    const insights = gerarInsightsLote(r, entregaMs, snap.maquinas);
+    insights.forEach(i => { contagem[i.nivel]++; });
+    linhas.push('');
+    linhas.push('═'.repeat(64));
+    linhas.push(`LOTE ${idx + 1} — ${r.lote}`);
+    linhas.push('─'.repeat(64));
+    linhas.push(`• SKUs:            ${fmtNumResumo(r.qtdSkus)}${r.qtdKits > 0 ? ` (+ ${fmtNumResumo(r.qtdKits)} kit${r.qtdKits === 1 ? '' : 's'})` : ''}`);
+    linhas.push(`• Tiragem total:   ${fmtNumResumo(r.tiragemTotal)}`);
+    linhas.push(`• Impressão:       ${fmtJanelaResumo(r.impressao)}`);
+    linhas.push(`• Acabamento:      ${fmtJanelaResumo(r.acabamento)}`);
+    linhas.push(`• Formação de Kit: ${r.kit ? fmtJanelaResumo(r.kit) : '— (sem etapa de Shrink/Encaixotamento)'}`);
+    linhas.push(`• Término do lote: ${r.terminoGeral > 0 ? fmtDataHoraResumo(r.terminoGeral) : '—'}`);
+    linhas.push('');
+    linhas.push('Análise de risco:');
+    if (insights.length === 0) linhas.push('  ✅ Nenhum risco ou gargalo identificado.');
+    else insights.forEach(i => linhas.push(`  ${ICONE_NIVEL[i.nivel]} ${i.texto}`));
+  });
+
+  linhas.push('');
+  linhas.push('═'.repeat(64));
+  linhas.push(`Alertas: ${contagem.CRITICO} crítico(s) · ${contagem.ATENCAO} de atenção · ${contagem.INFO} informativo(s)`);
+  return linhas.join('\n');
+}
+
 const MachineRow = memo(function MachineRow({
   mq, tarefasDaMaquina, gridCells, ppd, dataInicioAbsMs,
   travasCalendario, mapaCoresLotes, skuDestacado, loteFocado, kitComponentesDestacados,
@@ -181,6 +637,9 @@ export default function GanttIndustrial() {
   const [fasesOverrides, setFasesOverrides] = useState<Record<string, string>>({});
   const [kitComponentesDestacados, setKitComponentesDestacados] = useState<Set<string>>(new Set());
   const [travaParaRemover, setTravaParaRemover] = useState<string | null>(null);
+  const [resumoSnapshot, setResumoSnapshot] = useState<SnapshotResumo | null>(null);
+  const [dataEntregaResumo, setDataEntregaResumo] = useState('');
+  const [resumoCopiado, setResumoCopiado] = useState(false);
 
 
   const setoresFixos = ['Impressão', 'Beneficiamento', 'Empastamento', 'Dobra', 'Corte e Vinco', 'Alceadeira', 'Acabamentos Finais', 'Formação de Kit'];
@@ -675,6 +1134,49 @@ export default function GanttIndustrial() {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
+  // Congela as tarefas JÁ agendadas em tela no instante do clique — não chama a API.
+  // Respeita os lotes ocultos aplicados, mas ignora a busca por SKU (o resumo é por lote inteiro).
+  const handleGerarResumoExecutivo = () => {
+    const tarefasEmTela = tarefasGlobais.filter(t => !appliedLotesOcultos.has(t.filtro_producao));
+    if (tarefasEmTela.length === 0) { setImpactoToast('⚠️ Nenhuma tarefa agendada em tela para resumir.'); return; }
+    const infoMaquinas: Record<string, MaquinaResumo> = {};
+    maquinas.forEach(m => {
+      const id = String(m.id).trim();
+      const cfg = simuladores[m.id] || configPadraoMaquina(m);
+      const fisico = Math.max(1, Number(m.maquinas || 1), Number(m.pessoas || 1));
+      infoMaquinas[id] = {
+        nome: String(m.modelo || m.id),
+        setor: setorPorMaquina.get(id) || obterSetorPertencente(m.tipo, ''),
+        diasTrabalho: Number(m.dias_trabalho) || 5,
+        horasDiarias: Number(m.horas_diarias) || 24,
+        unidadesEmUso: Math.min(fisico, Math.max(1, Number(cfg.usadas) || 1)),
+        modo: String(cfg.modo || 'DILUIR').toUpperCase(),
+      };
+    });
+    setResumoSnapshot({ tarefas: tarefasEmTela.slice(), geradoEm: new Date(), grafica: graficaSelecionada, ordemLotes: draftPrioridades.slice(), maquinas: infoMaquinas, travas: travasCalendario.slice() });
+    setResumoCopiado(false);
+  };
+
+  const textoResumoExecutivo = useMemo(() => {
+    if (!resumoSnapshot) return '';
+    const entregaMs = dataEntregaResumo ? new Date(`${dataEntregaResumo}T23:59:59Z`).getTime() : null;
+    return montarResumoExecutivo(resumoSnapshot, entregaMs !== null && Number.isFinite(entregaMs) ? entregaMs : null);
+  }, [resumoSnapshot, dataEntregaResumo]);
+
+  const copiarResumoExecutivo = async () => {
+    try { await navigator.clipboard.writeText(textoResumoExecutivo); setResumoCopiado(true); setTimeout(() => setResumoCopiado(false), 2500); }
+    catch { setImpactoToast('⚠️ Não foi possível copiar. Selecione o texto manualmente.'); }
+  };
+
+  const baixarResumoExecutivo = () => {
+    const blob = new Blob([textoResumoExecutivo], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.setAttribute('download', `Resumo_Executivo_${resumoSnapshot?.grafica || graficaSelecionada}.txt`);
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="w-full relative">
       {isLoading && (
@@ -780,6 +1282,7 @@ export default function GanttIndustrial() {
               )}
               {(skuDestacado || kitComponentesDestacados.size > 0) && <button onClick={() => { setSkuDestacado(null); setKitComponentesDestacados(new Set()); }} className="bg-amber-500 text-slate-900 font-bold px-2 py-1.5 rounded-lg text-[10px] uppercase shadow">Limpar SKU</button>}
               <button onClick={() => setShowModalRelatorio(true)} className="bg-teal-600 hover:bg-teal-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs shadow-sm"><i className="fas fa-file-alt mr-1"></i> Prazos</button>
+              <button onClick={handleGerarResumoExecutivo} disabled={isLoading || tarefasGlobais.length === 0} title={isDirty ? 'Gera o resumo do Gantt que está em tela (há alterações ainda não recalculadas)' : 'Gera o resumo do Gantt que está em tela, sem recalcular'} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs shadow-sm disabled:opacity-50"><i className="fas fa-clipboard-list mr-1"></i> Gerar Resumo Executivo</button>
               <button onClick={() => {
                 setMaquinaTrava('TODAS');
                 setDataInicioTrava('');
@@ -1028,6 +1531,32 @@ export default function GanttIndustrial() {
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL RESUMO EXECUTIVO (snapshot do Gantt em tela) */}
+      {resumoSnapshot && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-999 p-4" onClick={(e) => { if (e.target === e.currentTarget) setResumoSnapshot(null); }}>
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl overflow-hidden flex flex-col max-h-[85vh]">
+            <header className="bg-indigo-700 p-4 text-white flex justify-between items-center gap-4">
+              <div>
+                <h3 className="font-bold text-sm uppercase tracking-wide"><i className="fas fa-clipboard-list mr-2"></i> Resumo Executivo — {resumoSnapshot.grafica}</h3>
+                <p className="text-[10px] text-indigo-200 mt-0.5">Fotografia do Gantt em tela às {resumoSnapshot.geradoEm.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · não recalcula</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={copiarResumoExecutivo} className="bg-white/10 hover:bg-white/20 border border-white/20 font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-2"><i className={`fas ${resumoCopiado ? 'fa-check' : 'fa-copy'}`}></i> {resumoCopiado ? 'Copiado' : 'Copiar'}</button>
+                <button onClick={baixarResumoExecutivo} className="bg-white/10 hover:bg-white/20 border border-white/20 font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-2"><i className="fas fa-download"></i> .txt</button>
+                <button onClick={() => setResumoSnapshot(null)} className="text-indigo-200 hover:text-white font-bold text-xl ml-1">&times;</button>
+              </div>
+            </header>
+            <div className="px-4 py-2.5 bg-indigo-50 border-b border-indigo-100 flex items-center gap-3 text-xs">
+              <label className="font-black text-indigo-900 uppercase text-[10px]">Data de entrega (opcional)</label>
+              <input type="date" value={dataEntregaResumo} onChange={(e) => setDataEntregaResumo(e.target.value)} className="border border-indigo-200 rounded-lg px-2 py-1 font-bold text-slate-800 bg-white outline-none focus:ring-2 focus:ring-indigo-300" />
+              {dataEntregaResumo && <button onClick={() => setDataEntregaResumo('')} className="text-[10px] text-indigo-600 font-bold hover:underline">limpar</button>}
+              <span className="text-[10px] text-indigo-500">Usada só na análise de risco de atraso.</span>
+            </div>
+            <pre className="flex-1 overflow-auto p-5 text-[12px] leading-relaxed font-mono text-slate-800 whitespace-pre-wrap bg-white">{textoResumoExecutivo}</pre>
           </div>
         </div>
       )}

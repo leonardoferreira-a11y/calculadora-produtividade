@@ -2,6 +2,9 @@
 import { useEffect, useState, useRef, Fragment } from 'react';
 
 // Auxiliares de conversão de tempo
+// Frete (hh:mm -> horas decimais): cobrado UMA vez por etapa/máquina, não por setup.
+const freteDe = (m: any): number => timeToDecimal((m && m.frete) || '00:00');
+
 const timeToDecimal = (timeStr: string) => {
   if (!timeStr || timeStr === 'Pend.' || timeStr === '-') return 0;
   let d = 0, h = 0, m = 0;
@@ -413,9 +416,24 @@ export default function RegistrosTempo() {
              // Sem a tecnologia exata (ex.: gráfica sem Rotativa Offset ativa): cai para
              // o mesmo processo (Offset/Digital) antes de aceitar qualquer impressora.
              const pref = tecnologiaPreferida.toUpperCase();
-             const processo = pref.includes("OFFSET") ? "OFFSET" : pref.includes("DIGITAL") ? "DIGITAL" : null;
-             const mesmoProcesso = processo ? candidatas.filter(m => `${m.tipo || ''} ${m.modelo || ''}`.toUpperCase().includes(processo)) : [];
-             if (mesmoProcesso.length > 0) candidatas = mesmoProcesso;
+             const textoMaq = (m: any) => `${m.tipo || ''} ${m.modelo || ''}`.toUpperCase();
+             if (pref.includes("ROTATIVA")) {
+               // Gráfica sem Rotativa (ex.: Rona): a regra de range de tiragem existe por custo,
+               // então a faixa da Rotativa cai na Plana Offset (não-digital), nunca na Plana Digital.
+               // Plana digital só entra se não houver nenhuma máquina offset.
+               const naoDigitais = candidatas.filter(m => !textoMaq(m).includes("DIGITAL"));
+               const planasOffset = naoDigitais.filter(m => textoMaq(m).includes("PLANA"));
+               if (planasOffset.length > 0) candidatas = planasOffset;
+               else if (naoDigitais.length > 0) candidatas = naoDigitais;
+             } else {
+               const processo = pref.includes("OFFSET") ? "OFFSET" : pref.includes("DIGITAL") ? "DIGITAL" : null;
+               // Máquinas offset nem sempre trazem "OFFSET" no nome (ex.: STAR7 "PLANA CAPAS CD 6",
+               // "PLANA MÉDIA"): offset = tudo que não é digital, para a faixa offset nunca cair em digital.
+               const mesmoProcesso = processo === "OFFSET"
+                 ? candidatas.filter(m => !textoMaq(m).includes("DIGITAL"))
+                 : processo ? candidatas.filter(m => textoMaq(m).includes(processo)) : [];
+               if (mesmoProcesso.length > 0) candidatas = mesmoProcesso;
+             }
          }
     }
 
@@ -590,7 +608,7 @@ export default function RegistrosTempo() {
     const tiragemProduzida = calcularTiragemComQuebra(tiragemFinalOS, maquina);
     const capacidadeMax = Number(maquina.configuracoes?.pgs_caderno) || 16;
     const velocidade = Number(maquina.produtividade_unit) || 1;
-    const setupUnitario = timeToDecimal(maquina.setup || '00:00');
+    const setupUnitario = timeToDecimal((maquina.setup || '00:00'));
     const qtdCores = Number(maquina.maq_cores) || 4;
     const passadas = qtdCores <= 4 ? 2 : 1;
     const _tipo = String(maquina?.tipo || '').toUpperCase();
@@ -620,7 +638,7 @@ export default function RegistrosTempo() {
     }
 
     const totalCadernos = cadernosInteiros + (paginasRestantes > 0 ? 1 : 0);
-    return { parametros: { capacidadeMax, velocidade, setupUnitario: maquina.setup, tiragemProduzida, paginasRestantes, cadernosInteiros, posesFracionado: poses, passadas, qtdCores, tiragemFinalOS }, maquinaSetupStr: maquina.setup || '00:00', linhas, totais: { qtd: totalCadernos, giros: totalGirosInteiros + girosFracionado, setup: decimalToTime(setupInteirosDecimal + setupFracionadoDecimal), rodagem: decimalToTime(rodagemInteirosDecimal + rodagemFracionadoDecimal), total: decimalToTime(setupInteirosDecimal + setupFracionadoDecimal + rodagemInteirosDecimal + rodagemFracionadoDecimal) } };
+    return { parametros: { capacidadeMax, velocidade, setupUnitario: (maquina.setup || '00:00'), tiragemProduzida, paginasRestantes, cadernosInteiros, posesFracionado: poses, passadas, qtdCores, tiragemFinalOS }, maquinaSetupStr: (maquina.setup || '00:00'), linhas, totais: { qtd: totalCadernos, giros: totalGirosInteiros + girosFracionado, setup: decimalToTime(setupInteirosDecimal + setupFracionadoDecimal + freteDe(maquina)), rodagem: decimalToTime(rodagemInteirosDecimal + rodagemFracionadoDecimal), total: decimalToTime(setupInteirosDecimal + setupFracionadoDecimal + freteDe(maquina) + rodagemInteirosDecimal + rodagemFracionadoDecimal) } };
   };
 
   // Base PADRÃO de acabamento (fórmula fixa), usada quando o item é calculado
@@ -648,7 +666,7 @@ export default function RegistrosTempo() {
   const calcularImpressaoCapa = (maquina: any, capas: any[], tiragemOS: number) => {
     if (!maquina || !capas || capas.length === 0) return null;
     const velocidade = Number(maquina.produtividade_unit) || 1;
-    const setupUnitario = timeToDecimal(maquina.setup || '00:00');
+    const setupUnitario = timeToDecimal((maquina.setup || '00:00'));
     const maqCores = Number(maquina.maq_cores) || 4;
 
     let totalGiros = 0;
@@ -692,17 +710,17 @@ export default function RegistrosTempo() {
       }
     });
 
-    const setupTotalDec = totalSetups * setupUnitario;
+    const setupTotalDec = totalSetups * setupUnitario + freteDe(maquina);
     const rodagemDec = totalGiros / velocidade;
     const totalImpCapaDec = grafica === 'IMOS' ? Math.max(setupTotalDec + rodagemDec, 1.75) : setupTotalDec + rodagemDec;
 
-    return { maquinaSetupStr: maquina.setup || '00:00', parametros: { velocidade, setups: totalSetups, giros: totalGiros }, linhas, totais: { setup: decimalToTime(setupTotalDec), rodagem: decimalToTime(rodagemDec), total: decimalToTime(totalImpCapaDec) } };
+    return { maquinaSetupStr: (maquina.setup || '00:00'), parametros: { velocidade, setups: totalSetups, giros: totalGiros }, linhas, totais: { setup: decimalToTime(setupTotalDec), rodagem: decimalToTime(rodagemDec), total: decimalToTime(totalImpCapaDec) } };
   };
 
   const calcularBeneficiamentoCapa = (maquina: any, capas: any[], tiragemOS: number, maqImpCapaOrigem: any) => {
     if (!maquina || !capas || capas.length === 0) return null;
     const velocidade = Number(maquina.produtividade_unit) || 1;
-    const setupUnitario = timeToDecimal(maquina.setup || '00:00');
+    const setupUnitario = timeToDecimal((maquina.setup || '00:00'));
 
     let totalFolhas = 0;
     let totalSetups = 0;
@@ -728,16 +746,16 @@ export default function RegistrosTempo() {
 
     if (totalSetups === 0) return null;
 
-    const setupTotalDec = totalSetups * setupUnitario;
+    const setupTotalDec = totalSetups * setupUnitario + freteDe(maquina);
     const rodagemDec = totalFolhas / velocidade;
 
-    return { maquinaSetupStr: maquina.setup || '00:00', parametros: { velocidade, totalFolhas, setups: totalSetups }, linhas, totais: { setup: decimalToTime(setupTotalDec), rodagem: decimalToTime(rodagemDec), total: decimalToTime(setupTotalDec + rodagemDec) } };
+    return { maquinaSetupStr: (maquina.setup || '00:00'), parametros: { velocidade, totalFolhas, setups: totalSetups }, linhas, totais: { setup: decimalToTime(setupTotalDec), rodagem: decimalToTime(rodagemDec), total: decimalToTime(setupTotalDec + rodagemDec) } };
   };
 
   const calcularEmpastamentoCapa = (maquina: any, capas: any[], tiragemOS: number, maqImpCapaOrigem: any) => {
     if (!maquina || !capas || capas.length === 0) return null;
     const velocidade = Number(maquina.produtividade_unit) || 1; 
-    const setupUnitario = timeToDecimal(maquina.setup || '00:00');
+    const setupUnitario = timeToDecimal((maquina.setup || '00:00'));
 
     let totalCapas = 0;
     let totalSetups = 0;
@@ -768,11 +786,11 @@ export default function RegistrosTempo() {
 
     if (totalSetups === 0) return null;
 
-    const setupTotalDec = totalSetups * setupUnitario;
+    const setupTotalDec = totalSetups * setupUnitario + freteDe(maquina);
     const rodagemDec = totalCapas / velocidade;
 
     return { 
-      maquinaSetupStr: maquina.setup || '00:00', 
+      maquinaSetupStr: (maquina.setup || '00:00'), 
       parametros: { velocidade, totalCapas, setups: totalSetups }, 
       linhas, 
       totais: { setup: decimalToTime(setupTotalDec), rodagem: decimalToTime(rodagemDec), total: decimalToTime(setupTotalDec + rodagemDec) } 
@@ -782,7 +800,7 @@ export default function RegistrosTempo() {
   const calcularCorteVinco = (maquina: any, analiseEncarte: any, analiseAdesivo: any, encarteItem: any) => {
     if (!maquina || (!analiseEncarte && !analiseAdesivo)) return null;
     const velocidade = Number(maquina.produtividade_unit) || 1;
-    const setupUnitario = timeToDecimal(maquina.setup || '00:00');
+    const setupUnitario = timeToDecimal((maquina.setup || '00:00'));
 
     let totalFolhas = 0;
     let setups = 0;
@@ -805,10 +823,10 @@ export default function RegistrosTempo() {
 
     if (setups === 0) return null;
 
-    const setupTotalDec = setups * setupUnitario;
+    const setupTotalDec = setups * setupUnitario + freteDe(maquina);
     const rodagemDec = totalFolhas / velocidade;
 
-    return { maquinaSetupStr: maquina.setup || '00:00', parametros: { velocidade, totalFolhas, setups }, linhas, totais: { setup: decimalToTime(setupTotalDec), rodagem: decimalToTime(rodagemDec), total: decimalToTime(setupTotalDec + rodagemDec) } };
+    return { maquinaSetupStr: (maquina.setup || '00:00'), parametros: { velocidade, totalFolhas, setups }, linhas, totais: { setup: decimalToTime(setupTotalDec), rodagem: decimalToTime(rodagemDec), total: decimalToTime(setupTotalDec + rodagemDec) } };
   };
 
   const calcularDobra = (maquinaDobra: any, analiseImpressao: any, maquinaImpressaoSelecionada: any, paginasOS: number = 0) => {
@@ -829,9 +847,9 @@ export default function RegistrosTempo() {
       totalEntradasFolhas = Math.ceil((paginasOS / 4) * tiragemProduzida);
     }
     const velocidade = Number(maquinaDobra.produtividade_unit) || 1;
-    const setupTotalDecimal = timeToDecimal(maquinaDobra.setup || '00:00') * tiposCadernos;
+    const setupTotalDecimal = timeToDecimal((maquinaDobra.setup || '00:00')) * tiposCadernos + freteDe(maquinaDobra);
     const rodagemDecimal = totalEntradasFolhas / velocidade;
-    return { maquinaSetupStr: maquinaDobra.setup || '00:00', isRotativa: false, parametros: { velocidade, setupUnitario: maquinaDobra.setup, tiposCadernos, totalFolhas: totalEntradasFolhas }, totais: { entradas: totalEntradasFolhas, setup: decimalToTime(setupTotalDecimal), rodagem: decimalToTime(rodagemDecimal), total: decimalToTime(setupTotalDecimal + rodagemDecimal) } };
+    return { maquinaSetupStr: (maquinaDobra.setup || '00:00'), isRotativa: false, parametros: { velocidade, setupUnitario: (maquinaDobra.setup || '00:00'), tiposCadernos, totalFolhas: totalEntradasFolhas }, totais: { entradas: totalEntradasFolhas, setup: decimalToTime(setupTotalDecimal), rodagem: decimalToTime(rodagemDecimal), total: decimalToTime(setupTotalDecimal + rodagemDecimal) } };
   };
 
   const calcularAlceamento = (maquinaAlceadeira: any, analiseImpressao: any, maquinaImpressao?: any) => {
@@ -850,13 +868,13 @@ export default function RegistrosTempo() {
     
     const gavetas = Number(config.gavetas) || 1;
     const velocidade = Number(maquinaAlceadeira.produtividade_unit) || 1;
-    const setupUnitarioDecimal = timeToDecimal(maquinaAlceadeira.setup || '00:00');
+    const setupUnitarioDecimal = timeToDecimal((maquinaAlceadeira.setup || '00:00'));
     const entradas = Math.ceil(totalCadernosImpressos / gavetas);
-    const setupTotalDecimal = setupUnitarioDecimal * entradas;
+    const setupTotalDecimal = setupUnitarioDecimal * entradas + freteDe(maquinaAlceadeira);
     
     const rodagemDecimal = (tiragemProduzida * entradas) / velocidade;
     
-    return { maquinaSetupStr: maquinaAlceadeira.setup || '00:00', parametros: { gavetas, entradas, totalCadernos: totalCadernosImpressos, velocidade, setupUnitario: maquinaAlceadeira.setup, livrosAlceados: tiragemProduzida }, totais: { setup: decimalToTime(setupTotalDecimal), rodagem: decimalToTime(rodagemDecimal), total: decimalToTime(setupTotalDecimal + rodagemDecimal) } };
+    return { maquinaSetupStr: (maquinaAlceadeira.setup || '00:00'), parametros: { gavetas, entradas, totalCadernos: totalCadernosImpressos, velocidade, setupUnitario: (maquinaAlceadeira.setup || '00:00'), livrosAlceados: tiragemProduzida }, totais: { setup: decimalToTime(setupTotalDecimal), rodagem: decimalToTime(rodagemDecimal), total: decimalToTime(setupTotalDecimal + rodagemDecimal) } };
   };
 
   const calcularGrampo = (maquinaGrampo: any, analiseImpressao: any, paginasOS: number = 0, maquinaImpressao?: any) => {
@@ -875,15 +893,15 @@ export default function RegistrosTempo() {
 
     const gavetas = Number(config.gavetas) || 1;
     const velocidade = Number(maquinaGrampo.produtividade_unit) || 1;
-    const setupUnitarioDecimal = timeToDecimal(maquinaGrampo.setup || '00:00');
+    const setupUnitarioDecimal = timeToDecimal((maquinaGrampo.setup || '00:00'));
     const entradas = Math.ceil(totalCadernosImpressos / gavetas);
-    const setupTotalDecimal = setupUnitarioDecimal * entradas;
+    const setupTotalDecimal = setupUnitarioDecimal * entradas + freteDe(maquinaGrampo);
 
     const rodagemDecimal = (tiragemProduzida * entradas) / velocidade;
     const totalDecimal = setupTotalDecimal + rodagemDecimal;
     const totalFinalDecimal = grafica === 'IMOS' && paginasOS > 84 ? totalDecimal * 2 : totalDecimal;
 
-    return { maquinaSetupStr: maquinaGrampo.setup || '00:00', parametros: { gavetas, entradas, totalCadernos: totalCadernosImpressos, velocidade, setupUnitario: maquinaGrampo.setup, livrosGrampeados: tiragemProduzida }, totais: { setup: decimalToTime(setupTotalDecimal), rodagem: decimalToTime(rodagemDecimal), total: decimalToTime(totalFinalDecimal) } };
+    return { maquinaSetupStr: (maquinaGrampo.setup || '00:00'), parametros: { gavetas, entradas, totalCadernos: totalCadernosImpressos, velocidade, setupUnitario: (maquinaGrampo.setup || '00:00'), livrosGrampeados: tiragemProduzida }, totais: { setup: decimalToTime(setupTotalDecimal), rodagem: decimalToTime(rodagemDecimal), total: decimalToTime(totalFinalDecimal) } };
   };
 
   const calcularEspiral = (maquinaFuracao: any, maquinaEspiral: any, analiseImpressao: any, paginasLivro: number, lombada_mm: any) => {
@@ -897,9 +915,9 @@ export default function RegistrosTempo() {
       if (!tec.includes('AUTO') && !tec.includes('SEMI')) {
         exigeFuracaoManual = true;
         velFuracaoMapeada = Number(maquinaFuracao.produtividade_unit) || 1;
-        setupFuracaoMapeado = maquinaFuracao.setup || '00:00';
+        setupFuracaoMapeado = (maquinaFuracao.setup || '00:00');
         totalPaginasFuras = paginasLivro * tiragemProduzida;
-        tempoFuracaoDecimal = timeToDecimal(setupFuracaoMapeado) + (totalPaginasFuras / velFuracaoMapeada);
+        tempoFuracaoDecimal = timeToDecimal(setupFuracaoMapeado) + freteDe(maquinaFuracao) + (totalPaginasFuras / velFuracaoMapeada);
       }
     }
 
@@ -939,10 +957,10 @@ export default function RegistrosTempo() {
     }
 
     const rodagemEspiralDecimal = tiragemProduzida / velocidadeEspiral;
-    const tempoEspiralDecimal = timeToDecimal(maquinaEspiral.setup || '00:00') + rodagemEspiralDecimal;
+    const tempoEspiralDecimal = timeToDecimal((maquinaEspiral.setup || '00:00')) + freteDe(maquinaEspiral) + rodagemEspiralDecimal;
 
     return { 
-      maquinaSetupStr: maquinaEspiral.setup || '00:00',
+      maquinaSetupStr: (maquinaEspiral.setup || '00:00'),
       parametros: { 
           exigeFuracaoManual, 
           velFuracao: velFuracaoMapeada, 
