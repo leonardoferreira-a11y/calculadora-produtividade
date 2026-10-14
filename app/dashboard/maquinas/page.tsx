@@ -175,6 +175,19 @@ export default function ParqueMaquinas() {
     } catch(e) { mostrarAvisoTela('Erro de conexão.', 'erro'); }
   };
 
+  const alternarAtivo = async (m: any) => {
+    const novoStatus = m.ativo === false;
+    try {
+      const res = await fetch(`/api/maquinas/${m.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ativo: novoStatus })
+      });
+      if (res.ok) { mostrarAvisoTela(novoStatus ? `"${m.modelo}" reativada.` : `"${m.modelo}" inativada — fora dos cálculos e do Gantt.`, 'sucesso'); buscarDados(); }
+      else mostrarAvisoTela('Erro ao alterar status da máquina.', 'erro');
+    } catch(e) { mostrarAvisoTela('Erro de conexão.', 'erro'); }
+  };
+
   // ----------------------------------------------------------------------
   // FUNÇÃO DE DUPLICAÇÃO DE MÁQUINAS COM OS ESTADOS CORRETOS DO SEU PROJETO
   // ----------------------------------------------------------------------
@@ -369,11 +382,14 @@ export default function ParqueMaquinas() {
                 }
 
                 return (
-                  <tr key={m.id} className="hover:bg-slate-50/50 transition-colors whitespace-nowrap">
+                  <tr key={m.id} className={`hover:bg-slate-50/50 transition-colors whitespace-nowrap ${m.ativo === false ? 'opacity-50 bg-slate-50' : ''}`}>
                     <td className="p-3 font-medium uppercase">{m.grafica}</td>
                     <td className="p-3">{m.tipo}</td>
                     <td className="p-3">{m.tecnologia || '-'}</td>
-                    <td className="p-3 font-medium max-w-[180px] truncate" title={m.modelo}>{m.modelo}</td>
+                    <td className="p-3 font-medium max-w-[180px] truncate" title={m.modelo}>
+                      {m.ativo === false && <span className="mr-2 bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase">Inativa</span>}
+                      {m.modelo}
+                    </td>
                     <td className="p-3 text-center">{m.maq_cores || 0}</td>
                     <td className="p-3 text-center font-bold">{m.maquinas}</td>
                     <td className="p-3 text-center">{m.pessoas}</td>
@@ -414,6 +430,13 @@ export default function ParqueMaquinas() {
                             title="Duplicar Especificações"
                           >
                             <i className="fas fa-copy"></i>
+                          </button>
+                          <button
+                            onClick={() => alternarAtivo(m)}
+                            className={`transition-colors p-2 ${m.ativo === false ? 'text-emerald-500 hover:text-emerald-700' : 'text-slate-400 hover:text-amber-600'}`}
+                            title={m.ativo === false ? 'Reativar Máquina' : 'Inativar Máquina (sai dos cálculos e do Gantt)'}
+                          >
+                            <i className={`fas ${m.ativo === false ? 'fa-toggle-off' : 'fa-toggle-on'}`}></i>
                           </button>
                           <button
                             onClick={() => excluirMaquina(m.id, m.modelo)}

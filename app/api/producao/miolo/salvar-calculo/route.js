@@ -1,5 +1,6 @@
 import pool from '@/lib/db';
 import { NextResponse } from 'next/server';
+import { createHash } from 'crypto';
 
 export async function POST(request) {
   try {
@@ -91,6 +92,15 @@ export async function POST(request) {
       return (d * 24) + h + (m / 60);
     };
 
+    // gantt_tarefas.id é PRIMARY KEY global: o mesmo SKU pode existir em outra gráfica/lote,
+    // então o id carrega um escopo (hash hex de gráfica+lote — hex não contém as palavras
+    // 'imp'/'dob'/'col' que o gantt usa como fallback para achar a dependência pelo id).
+    const escopo = createHash('md5')
+      .update(`${grafica_limpa.toUpperCase()}|${filtro_limpo.toUpperCase()}`)
+      .digest('hex')
+      .slice(0, 6);
+    const prefixoId = `${sku_limpo}@${escopo}`;
+
     const etapasSalvasNestaRodada = {};
 
     // 2.1 Processamento Padrão de Chaves Simples
@@ -106,7 +116,7 @@ export async function POST(request) {
         
         if (tempoHoras > 0) {
           etapasSalvasNestaRodada[etapa.idStr] = {
-            id: `${sku_limpo}_${etapa.idStr}`,
+            id: `${prefixoId}_${etapa.idStr}`,
             nome: etapa.nome,
             horas: tempoHoras,
             maquina: String(dadosDaChave.maquina_id || 'MANUAL').trim()
@@ -132,7 +142,7 @@ export async function POST(request) {
       const tempoFuro = timeToDecimal(resEspir.furacao || '00:00');
       if (tempoFuro > 0) {
         etapasSalvasNestaRodada['FURO'] = {
-          id: `${sku_limpo}_FURO`,
+          id: `${prefixoId}_FURO`,
           nome: 'Furação',
           horas: tempoFuro,
           maquina: String(dados_calculo.espiral.maquina_furacao_id || 'MANUAL').trim()
@@ -143,7 +153,7 @@ export async function POST(request) {
       const tempoEspiral = timeToDecimal(resEspir.espiral || '00:00');
       if (tempoEspiral > 0) {
         etapasSalvasNestaRodada['ESP'] = {
-          id: `${sku_limpo}_ESP`,
+          id: `${prefixoId}_ESP`,
           nome: 'Espiralação',
           horas: tempoEspiral,
           maquina: String(dados_calculo.espiral.maquina_espiral_id || 'MANUAL').trim()
@@ -152,7 +162,7 @@ export async function POST(request) {
     }
 
     for (const idStr of Object.keys(etapasSalvasNestaRodada)) {
-      const info = extrairNoCascata(idStr, etapasSalvasNestaRodada, caminhosDefensivos, sku_limpo);
+      const info = extrairNoCascata(idStr, etapasSalvasNestaRodada, caminhosDefensivos, prefixoId);
       await pool.query(
         `INSERT INTO gantt_tarefas (id, sku_alvo, filtro_producao, grafica, nome_etapa, maquina_id, tempo_estimado_horas, id_dependencia)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,

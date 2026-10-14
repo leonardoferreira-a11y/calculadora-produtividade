@@ -4,6 +4,26 @@ import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300; 
 
+// 🔴 AUXILIAR: Converte uma coluna de data (varchar) em timestamp. Aceita DD/MM/AA e
+// DD/MM/AAAA (importação, com hora opcional) e AAAA-MM-DD (inputs de data da tela).
+// Qualquer outro conteúdo vira NULL, para o COALESCE cair na próxima data.
+const dataSql = (col) => `CASE
+                  WHEN ${col} ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}' THEN to_timestamp(${col}, 'DD/MM/YYYY HH24:MI')
+                  WHEN ${col} ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{2}' THEN to_timestamp(${col}, 'DD/MM/YY HH24:MI')
+                  WHEN ${col} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' THEN ${col}::timestamp
+                END`;
+
+// 🔴 AUXILIAR: Início Imp. "automático" = 5º dia útil (seg–sex) após a maior data entre
+// Fim Aprov. Arquivo e Envio Tiragem. NULL se nenhuma das duas existir.
+const inicioAutomaticoSql = (fim, envio) => `(
+                  SELECT g FROM generate_series(
+                    (GREATEST(${dataSql(fim)}, ${dataSql(envio)})::date + 1)::timestamp,
+                    (GREATEST(${dataSql(fim)}, ${dataSql(envio)})::date + 9)::timestamp,
+                    interval '1 day') AS g
+                  WHERE EXTRACT(ISODOW FROM g) < 6
+                  ORDER BY g OFFSET 4 LIMIT 1
+                )`;
+
 // 🔴 AUXILIAR: Transforma "04:00" em 4.0 horas decimais
 const timeToDecimal = (timeStr) => {
   if (!timeStr || !timeStr.includes(':')) return 0;
@@ -18,7 +38,7 @@ export async function POST(request) {
 
     if (!grafica) return NextResponse.json({ message: "Gráfica é obrigatória." }, { status: 400 });
 
-    const resMaquinas = await pool.query(`SELECT * FROM maquinas WHERE UPPER(TRIM(grafica)) = UPPER(TRIM($1))`, [grafica]);
+    const resMaquinas = await pool.query(`SELECT * FROM maquinas WHERE UPPER(TRIM(grafica)) = UPPER(TRIM($1)) AND ativo`, [grafica]);
     const maquinasReais = resMaquinas.rows;
 
     const resTarefas = await pool.query(
@@ -33,14 +53,13 @@ export async function POST(request) {
               pm.tiragem AS pm_tiragem,
               pm.paginacao AS pm_paginacao,
               pm.acabamento AS pm_acabamento,
-              CASE
-                WHEN NULLIF(d.dt_calculo, '') IS NOT NULL THEN
-                  CASE
-                    WHEN d.dt_calculo LIKE '%/%' THEN to_timestamp(d.dt_calculo, 'DD/MM/YY HH24:MI')
-                    ELSE d.dt_calculo::timestamp
-                  END
-                ELSE CURRENT_TIMESTAMP
-              END AS ideal_inicio
+              COALESCE(
+                ${dataSql('d.dt_calculo')},
+                ${dataSql('d.dt_replan_inicio_imp')},
+                ${dataSql('d.dt_plan_inicio_imp')},
+                ${inicioAutomaticoSql('d.dt_fim_aprove_arquivo', 'd.dt_envio_tiragem')},
+                CURRENT_TIMESTAMP
+              ) AS ideal_inicio
        FROM gantt_tarefas t
        LEFT JOIN maquinas m ON TRIM(t.maquina_id) = TRIM(m.id::text)
        LEFT JOIN prod_datas_iniciais d
@@ -351,18 +370,36 @@ export async function POST(request) {
       return r;
     };
 
+    // Regra de início: um item que COMEÇA a produzir sempre começa às 08:00. Só roda entre
+    // 00:00 e 08:00 quem já estava em produção no fim do dia anterior (continuação).
+    const INICIO_PRODUCAO_H = 8;
+    const alinharInicioProducao = (data, diasTrabalho, horasDiarias, maquinaId) => {
+      let r = alinharProximoTurnoValido(data, diasTrabalho, horasDiarias, maquinaId);
+      if (Number(horasDiarias) <= INICIO_PRODUCAO_H) return r;
+      for (let i = 0; i < 30; i++) {
+        if (r.getUTCHours() + (r.getUTCMinutes() / 60) >= INICIO_PRODUCAO_H) break;
+        r.setUTCHours(INICIO_PRODUCAO_H, 0, 0, 0);
+        r = alinharProximoTurnoValido(r, diasTrabalho, horasDiarias, maquinaId);
+      }
+      return r;
+    };
+
     const simularJanelaDeTrabalho = (dataInicioStr, horasNecessarias, maquinaId, diasTrabalhoBase, horasDiariasBase) => {
-      let relogio = alinharProximoTurnoValido(dataInicioStr, diasTrabalhoBase, horasDiariasBase, maquinaId);
+      let relogio = alinharInicioProducao(dataInicioStr, diasTrabalhoBase, horasDiariasBase, maquinaId);
       let horasFaltantes = Number(horasNecessarias);
       let dataInicioEfetivo = new Date(relogio);
       let horasIndisponiveisRegra = 0;
-      let limiteLoops = 1500; 
+      let limiteLoops = 1500;
 
       while (horasFaltantes > 0 && limiteLoops > 0) {
         limiteLoops--;
         let relogioAntes = new Date(relogio);
-        relogio = alinharProximoTurnoValido(relogio, diasTrabalhoBase, horasDiariasBase, maquinaId);
-        
+        const aindaNaoIniciou = horasFaltantes === Number(horasNecessarias);
+        relogio = aindaNaoIniciou
+          ? alinharInicioProducao(relogio, diasTrabalhoBase, horasDiariasBase, maquinaId)
+          : alinharProximoTurnoValido(relogio, diasTrabalhoBase, horasDiariasBase, maquinaId);
+        if (aindaNaoIniciou) dataInicioEfetivo = new Date(relogio);
+
         if (relogio.getTime() > relogioAntes.getTime()) horasIndisponiveisRegra += (relogio.getTime() - relogioAntes.getTime()) / (1000 * 60 * 60);
 
         const ano = relogio.getUTCFullYear();
@@ -717,6 +754,9 @@ export async function POST(request) {
       let slotEscolhidoIndex = 0;
       let tempoRealAlocado = Number(tarefa.tempo_estimado_horas) > 0 ? Number(tarefa.tempo_estimado_horas) : 0.016; 
       let setupFoiDescontado = false;
+      // Quantas unidades físicas a tarefa ocupa ao mesmo tempo (só informativo — usado
+      // no Resumo Executivo para medir ocupação em horas-máquina; não altera o cálculo).
+      let unidadesOcupadas = 1;
 
       if (tarefa._isEspiral && !tarefa._isManualEspiral) {
           const mqData = maquinasReais.find(m => String(m.id) === String(mqId));
@@ -734,6 +774,7 @@ export async function POST(request) {
 
       if (modoOperacao === 'DILUIR') {
         tempoRealAlocado = tempoRealAlocado / numMaquinasUsadas;
+        unidadesOcupadas = numMaquinasUsadas;
         janelaFinal = simularJanelaDeTrabalho(dataInicioReal, tempoRealAlocado, mqId, diasTrabBase, horasDiariasBase);
         for (let s = 0; s < numMaquinasUsadas; s++) controleMaquinasFim[mqId][s] = janelaFinal.fim;
       } else if (modoOperacao === 'CONCORRENTE') {
@@ -756,6 +797,7 @@ export async function POST(request) {
         }
         const divisorReal = slotsDisponiveisJuntos.length || 1;
         tempoRealAlocado = tempoRealAlocado / divisorReal;
+        unidadesOcupadas = divisorReal;
         let tRealInicio = menorFimTime > tempoParaOcupacao.getTime() ? new Date(menorFimTime) : new Date(tempoParaOcupacao);
         janelaFinal = simularJanelaDeTrabalho(tRealInicio, tempoRealAlocado, mqId, diasTrabBase, horasDiariasBase);
         slotsDisponiveisJuntos.forEach(s => { controleMaquinasFim[mqId][s] = janelaFinal.fim; });
@@ -788,6 +830,8 @@ export async function POST(request) {
         tempo_producao_efetivo: tempoRealAlocado,
         tempo_indisponivel_regra: janelaFinal.horasIndisponiveisRegra,
         sub_linha: slotEscolhidoIndex,
+        unidades_ocupadas: unidadesOcupadas,
+        unidades_em_uso: numMaquinasUsadas,
         _isPUR: tarefa._isPUR,
         _isAlc: tarefa._isAlc,
         is_antecipacao: tarefa.is_antecipacao || false

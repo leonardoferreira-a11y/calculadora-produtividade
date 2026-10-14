@@ -27,10 +27,20 @@ export async function POST(request) {
     const body = await request.json();
     const { grafica, maquina_id, data_alvo, status_operacional, horas_disponiveis, motivo } = body;
 
+    if (!grafica || !maquina_id || !data_alvo) {
+      return NextResponse.json({ message: "Gráfica, equipamento e data são obrigatórios" }, { status: 400 });
+    }
+
+    // Upsert: regravar um dia já travado atualiza a trava em vez de violar
+    // a constraint unica_trava_por_dia (grafica, maquina_id, data_alvo).
     await pool.query(
-      `INSERT INTO gantt_calendario_trava (grafica, maquina_id, data_alvo, status_operacional, horas_disponiveis, motivo) 
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [grafica, maquina_id, data_alvo, status_operacional, horas_disponiveis, motivo]
+      `INSERT INTO gantt_calendario_trava (grafica, maquina_id, data_alvo, status_operacional, horas_disponiveis, motivo)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (grafica, maquina_id, data_alvo)
+       DO UPDATE SET status_operacional = EXCLUDED.status_operacional,
+                     horas_disponiveis = EXCLUDED.horas_disponiveis,
+                     motivo = EXCLUDED.motivo`,
+      [String(grafica).toUpperCase().trim(), maquina_id, data_alvo, status_operacional || 'INATIVO', Number(horas_disponiveis) || 0, motivo]
     );
 
     return NextResponse.json({ message: "Trava registrada com sucesso!" }, { status: 200 });

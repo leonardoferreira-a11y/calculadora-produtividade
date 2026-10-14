@@ -142,11 +142,34 @@ export async function GET(request) {
          ORDER BY m.sku_miolo ASC`,
         [filtro_producao, grafica]
       ),
+      // Uma linha por SKU filho do kit, com a descrição do produto (miolo ligado à capa).
       pool.query(
-        `SELECT * FROM prod_kits
-         WHERE UPPER(TRIM(filtro_producao)) = UPPER(TRIM($1))
-           AND UPPER(TRIM(grafica)) = UPPER(TRIM($2))
-         ORDER BY id ASC`,
+        `SELECT k.*,
+                COALESCE(pm.descricao, pc.descricao) AS item_descricao,
+                EXISTS (
+                  SELECT 1 FROM kit_calculos kc
+                  WHERE UPPER(TRIM(kc.id_codigo_kit)) = UPPER(TRIM(k.id_codigo_kit))
+                    AND UPPER(TRIM(kc.filtro_producao)) = UPPER(TRIM(k.filtro_producao))
+                    AND UPPER(TRIM(kc.grafica)) = UPPER(TRIM(k.grafica))
+                ) AS tem_calculo
+         FROM prod_kits k
+         LEFT JOIN LATERAL (
+           SELECT c.descricao, c.sku_ref FROM prod_capas c
+           WHERE UPPER(TRIM(c.sku_capa)) = UPPER(TRIM(k.id_codigo_sku_capa))
+             AND UPPER(TRIM(c.filtro_producao)) = UPPER(TRIM(k.filtro_producao))
+             AND UPPER(TRIM(c.grafica)) = UPPER(TRIM(k.grafica))
+           ORDER BY c.id LIMIT 1
+         ) pc ON true
+         LEFT JOIN LATERAL (
+           SELECT m.descricao FROM prod_miolo m
+           WHERE UPPER(TRIM(m.sku_miolo)) = UPPER(TRIM(COALESCE(pc.sku_ref, k.id_codigo_sku_capa)))
+             AND UPPER(TRIM(m.filtro_producao)) = UPPER(TRIM(k.filtro_producao))
+             AND UPPER(TRIM(m.grafica)) = UPPER(TRIM(k.grafica))
+           ORDER BY m.id LIMIT 1
+         ) pm ON true
+         WHERE UPPER(TRIM(k.filtro_producao)) = UPPER(TRIM($1))
+           AND UPPER(TRIM(k.grafica)) = UPPER(TRIM($2))
+         ORDER BY k.id ASC`,
         [filtro_producao, grafica]
       ),
     ]);
@@ -384,7 +407,8 @@ export async function POST(request) {
        FROM prod_datas_iniciais
        WHERE UPPER(TRIM(sku)) = UPPER(TRIM($2))
          AND UPPER(TRIM(filtro_producao)) = UPPER(TRIM($3))
-         AND UPPER(TRIM(grafica)) = UPPER(TRIM($4))`,
+         AND UPPER(TRIM(grafica)) = UPPER(TRIM($4))
+       ON CONFLICT DO NOTHING`, // índice único (sku, lote, gráfica): ignora sobra órfã do novo SKU
       [novo, origem, filtro, graf]
     );
 
