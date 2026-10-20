@@ -541,16 +541,15 @@ export default function RegistrosTempo() {
     return candidata;
   };
 
+  const semAcento = (s: any) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
+  // O texto do beneficiamento raramente vem só "Laminação"/"Verniz" (ex.: "Laminação BOPP Fosca", "Verniz UV")
+  const ehLaminacao = (b: any) => { const t = semAcento(b); return t.includes('LAMIN') || t.includes('BOPP'); };
+  const ehVerniz = (b: any) => semAcento(b).includes('VERNIZ');
+
   const getMaquinaBeneficiamentoAdequada = (capas: any[], maquinaImpCapa?: any) => {
     // 1. Identifica o que a capa pede de forma flexível
-    const precisaLaminacao = capas.some(c => {
-      const b = String(c.beneficiamento || '').toUpperCase();
-      return b.includes('LAMIN') || b.includes('LAMINAÇÃO') || b.includes('BOPP') || b.includes('LAMI');
-    });
-    const precisaVerniz = capas.some(c => {
-      const b = String(c.beneficiamento || '').toUpperCase();
-      return b.includes('VERNIZ') || b.includes('VERN');
-    });
+    const precisaLaminacao = capas.some(c => ehLaminacao(c.beneficiamento));
+    const precisaVerniz = capas.some(c => ehVerniz(c.beneficiamento));
 
     const isStar7 = String(grafica).toUpperCase() === 'STAR7';
     const isPlanaCd6 = maquinaImpCapa && String(maquinaImpCapa.modelo || '').toUpperCase().includes('PLANA CAPAS CD 6');
@@ -562,10 +561,13 @@ export default function RegistrosTempo() {
 
     // 3. Função de busca super flexível (olha Tipo, Modelo e Descrição)
     const buscarMaquinaFlexivel = (palavrasChave: string[]) => {
-      const candidatas = maquinasCargadas.filter(m => {
-        const texto = `${m.tipo || ''} ${m.modelo || ''} ${m.descricao || ''}`.toUpperCase();
+      const casa = (m: any) => {
+        const texto = semAcento(`${m.tipo || ''} ${m.modelo || ''} ${m.descricao || ''}`);
         return palavrasChave.some(palavra => texto.includes(palavra));
-      });
+      };
+      // Prioriza máquinas do tipo Beneficiamento; só olha o parque inteiro se nenhuma casar
+      const doTipo = maquinasCargadas.filter(m => semAcento(m.tipo).includes('BENEFICIAMENTO') && casa(m));
+      const candidatas = doTipo.length > 0 ? doTipo : maquinasCargadas.filter(casa);
       if (candidatas.length === 0) return null;
       // Retorna a mais rápida dentre as encontradas
       return candidatas.sort((a, b) => Number(b.produtividade_unit || 0) - Number(a.produtividade_unit || 0))[0];
@@ -573,12 +575,12 @@ export default function RegistrosTempo() {
 
     // 4. Aplica as buscas específicas
     if (precisaLaminacao) {
-      const mqLam = buscarMaquinaFlexivel(['LAMIN', 'LAMI', 'LAMINAÇÃO', 'BOPP']);
+      const mqLam = buscarMaquinaFlexivel(['LAMIN', 'BOPP']);
       if (mqLam) return mqLam;
     }
-    
+
     if (precisaVerniz) {
-      const mqVer = buscarMaquinaFlexivel(['VERNIZ', 'VERN']);
+      const mqVer = buscarMaquinaFlexivel(['VERNIZ', 'ENVERNIZ']);
       if (mqVer) return mqVer;
     }
 
@@ -727,8 +729,7 @@ export default function RegistrosTempo() {
     let linhas: any[] = [];
 
     capas.forEach(capa => {
-      const benef = String(capa.beneficiamento || '').toUpperCase();
-      if (benef.includes('LAMINAÇÃO') || benef.includes('VERNIZ')) {
+      if (ehLaminacao(capa.beneficiamento) || ehVerniz(capa.beneficiamento)) {
         const tiragemCapa = Number(capa.tiragem || tiragemOS);
         const tiragemProduzida = calcularTiragemComQuebra(tiragemCapa, maqImpCapaOrigem);
         const tipo = String(capa.tipo_capa || '').toUpperCase();
@@ -2038,10 +2039,7 @@ export default function RegistrosTempo() {
         const maqImpCapa = maquinasCargadas.find(m => String(m.id) === String(idMaquinaImpressaoCapa || ''));
         const analiseImpCapa = exigeCapa ? usarSalvo('impressao_capa', () => calcularImpressaoCapa(maqImpCapa, capasDoItem, Number(osAtual.tiragem)), ['maquina_id', idMaquinaImpressaoCapa]) : null;
 
-        const exigeBeneficiamento = capasDoItem.some(c => {
-          const b = String(c.beneficiamento || '').toUpperCase();
-          return b.includes('LAMINAÇÃO') || b.includes('VERNIZ');
-        });
+        const exigeBeneficiamento = capasDoItem.some(c => ehLaminacao(c.beneficiamento) || ehVerniz(c.beneficiamento));
         const maqBenCapa = maquinasCargadas.find(m => String(m.id) === String(idMaquinaBeneficiamentoCapa || ''));
         const analiseBenCapa = exigeBeneficiamento ? usarSalvo('beneficiamento_capa', () => calcularBeneficiamentoCapa(maqBenCapa, capasDoItem, Number(osAtual.tiragem), maqImpCapa), ['maquina_id', idMaquinaBeneficiamentoCapa]) : null;
 

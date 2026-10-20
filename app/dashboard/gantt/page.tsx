@@ -1044,7 +1044,9 @@ export default function GanttIndustrial() {
   const gerarRelatorioPorSKU = () => {
     // 1. Descobrir os tempos de Kit (Encaixotamento/Shrink) nivelados pelo LOTE
     const kitPorLote: Record<string, { inicio: number, fim: number }> = {};
-    
+    // Janela de formação de cada código de kit (por lote + código), independente do lote todo
+    const kitPorCodigo: Record<string, { lote: string, sku: string, inicio: number, fim: number }> = {};
+
     tarefasFiltradas.forEach(t => {
       const etapaStr = String(t.nome_etapa).toLowerCase();
       if (etapaStr.includes('shrink') || etapaStr.includes('encaixot') || etapaStr.includes('kit') || etapaStr.includes('box')) {
@@ -1055,6 +1057,11 @@ export default function GanttIndustrial() {
         if (!kitPorLote[lote]) kitPorLote[lote] = { inicio: Infinity, fim: 0 };
         if (start < kitPorLote[lote].inicio) kitPorLote[lote].inicio = start;
         if (end > kitPorLote[lote].fim) kitPorLote[lote].fim = end;
+
+        const chave = `${lote}||${t.sku_alvo}`;
+        if (!kitPorCodigo[chave]) kitPorCodigo[chave] = { lote, sku: t.sku_alvo, inicio: Infinity, fim: 0 };
+        if (start < kitPorCodigo[chave].inicio) kitPorCodigo[chave].inicio = start;
+        if (end > kitPorCodigo[chave].fim) kitPorCodigo[chave].fim = end;
       }
     });
 
@@ -1100,13 +1107,14 @@ export default function GanttIndustrial() {
     
 
     // 4. Juntar as peças: Linha do SKU + Tempo de Kit do respectivo Lote
-    return Object.entries(skusObj).map(([sku, dados]) => {
+    const linhasSku = Object.entries(skusObj).map(([sku, dados]) => {
       const kitDoLote = kitPorLote[dados.lote] || { inicio: Infinity, fim: 0 };
-      
+
       // O Término Geral é o que for mais tarde: o fim dos acabamentos ou o fim do kit
       const terminoGeral = Math.max(dados.fimAcabFinais, kitDoLote.fim);
 
       return {
+        isKit: false,
         sku,
         lote: dados.lote,
         tiragem: dados.tiragem,
@@ -1119,7 +1127,21 @@ export default function GanttIndustrial() {
         inicioKit: format(kitDoLote.inicio), 
         fimKit: format(terminoGeral) // Usado também como a coluna "Término Geral"
       };
-    }).sort((a, b) => a.lote.localeCompare(b.lote));
+    });
+
+    // 5. Uma linha por código de kit, com a janela própria de formação daquele kit
+    const linhasKit = Object.values(kitPorCodigo).map(k => ({
+      isKit: true,
+      sku: k.sku,
+      lote: k.lote,
+      tiragem: '', paginacao: '', acabamento: 'KIT',
+      inicioImp: '-', fimImp: '-', inicioAcab: '-', fimAcabFinais: '-',
+      inicioKit: format(k.inicio),
+      fimKit: format(k.fim)
+    }));
+
+    // SKUs primeiro, kits depois, dentro de cada lote
+    return [...linhasSku, ...linhasKit].sort((a, b) => a.lote.localeCompare(b.lote) || Number(a.isKit) - Number(b.isKit));
   };
 
   const exportarRelatorioCSV = () => {
@@ -1514,9 +1536,9 @@ export default function GanttIndustrial() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {gerarRelatorioPorSKU().map((item, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                    <tr key={idx} className={`hover:bg-slate-50 transition-colors ${item.isKit ? 'bg-purple-50/40' : ''}`}>
                       <td className="p-3 font-bold text-teal-800"><span className={`px-2 py-0.5 rounded text-white ${mapaCoresLotes[item.lote]}`}>{item.lote}</span></td>
-                      <td className="p-3 font-black text-slate-800">{item.sku}</td>
+                      <td className="p-3 font-black text-slate-800">{item.isKit && <i className="fas fa-box text-purple-600 mr-1.5"></i>}{item.sku}</td>
                       <td className="p-3 font-mono text-center text-slate-600">{item.tiragem}</td>
                       <td className="p-3 font-mono text-center text-slate-600">{item.paginacao}</td>
                       <td className="p-3 text-center text-slate-600 text-[10px]">{item.acabamento}</td>
