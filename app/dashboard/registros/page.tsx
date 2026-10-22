@@ -38,17 +38,21 @@ const tempoParaCSV = (timeStr: string) => {
   return `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`;
 };
 
+// Mesma ordem do cálculo (miolo, capa, encarte/adesivo, acabamentos)
 const SECOES_CSV_DETALHADO: Array<[string, string]> = [
   ['impressao', 'Impressão Miolo'], ['impressao_capa', 'Impressão Capa'],
+  ['beneficiamento_capa', 'Beneficiamento Capa'], ['empastamento_capa', 'Empastamento Capa'],
   ['impressao_encarte', 'Impressão Encarte'], ['impressao_adesivo', 'Impressão Adesivo'],
-  ['corte_vinco', 'Corte e Vinco'], ['beneficiamento_capa', 'Beneficiamento Capa'],
-  ['empastamento_capa', 'Empastamento Capa'], ['dobra', 'Dobra'],
+  ['corte_vinco', 'Corte e Vinco'], ['dobra', 'Dobra'],
   ['alceamento', 'Alceamento'], ['grampo', 'Grampo'], ['espiral', 'Espiral'],
 ];
 
 const ETAPAS_CSV_CONSOLIDADO: Array<[string, string]> = [
-  ['impressao', 'T.Impressão'], ['impressao_capa', 'T.Capa'], ['impressao_encarte', 'T.Encarte'],
-  ['dobra', 'T.Dobra'], ['alceamento', 'T.Alceamento'], ['grampo', 'T.Grampo'], ['espiral', 'T.Espiral'],
+  ['impressao', 'T.Impressão Miolo'], ['impressao_capa', 'T.Impressão Capa'],
+  ['beneficiamento_capa', 'T.Beneficiamento Capa'], ['empastamento_capa', 'T.Empastamento Capa'],
+  ['impressao_encarte', 'T.Impressão Encarte'], ['impressao_adesivo', 'T.Impressão Adesivo'],
+  ['corte_vinco', 'T.Corte e Vinco'], ['dobra', 'T.Dobra'],
+  ['alceamento', 'T.Alceamento'], ['grampo', 'T.Grampo'], ['espiral', 'T.Espiral'],
 ];
 
 const CABECALHO_CSV_DETALHADO = 'Gráfica;Lote;SKU;Etapa;Tempo Setup;Tempo Rodagem;Tempo Total';
@@ -1995,6 +1999,13 @@ export default function RegistrosTempo() {
 
                     const tempoTotalSku = somarTodasAsStringsDeTempo([tImp, tImpCapa, tBenCapa, tEmpCapa, tImpEnc, tImpAde, tCortV, tDob, tAlc, tFim]);
 
+                    const detalharTempos = (itens: Array<[string, string]>) => itens
+                      .filter(([, t]) => t !== '-')
+                      .map(([label, t]) => `${label}: ${t}`)
+                      .join('\n');
+                    const tooltipCapa = detalharTempos([['Impressão', tImpCapa], ['Beneficiamento', tBenCapa], ['Empastamento', tEmpCapa]]);
+                    const tooltipEnc = detalharTempos([['Impressão Encarte', tImpEnc], ['Impressão Adesivo', tImpAde], ['Corte e Vinco', tCortV]]);
+
                     return (
                       <tr key={`${u.id}-${index}`} className="hover:bg-blue-50/50 cursor-pointer group" onClick={() => { 
                         setOsAtual(u); 
@@ -2055,8 +2066,8 @@ export default function RegistrosTempo() {
                         <td className="p-3 text-right font-mono font-bold text-slate-700">{Number(u.tiragem).toLocaleString('pt-BR')}</td>
                         <td className="p-3 uppercase text-[10px] border-r border-slate-200 font-bold text-slate-500 pl-4">{u.acabamento}</td>
                         <td className={`p-3 text-center font-mono text-[11px] ${tImp === 'Pend.' ? 'text-slate-400 italic' : 'font-bold text-blue-900 bg-blue-50/20'}`}>{tImp}</td>
-                        <td className={`p-3 text-center font-mono text-[11px] ${tCapaConsolidado === '-' ? 'text-slate-400 italic' : 'font-bold text-indigo-900 bg-indigo-50/20'}`}>{tCapaConsolidado}</td>
-                        <td className={`p-3 text-center font-mono text-[11px] ${tEncConsolidado === '-' ? 'text-slate-400 italic' : 'font-bold text-teal-900 bg-teal-50/20'}`}>{tEncConsolidado}</td>
+                        <td title={tooltipCapa ? `Soma de:\n${tooltipCapa}` : undefined} className={`p-3 text-center font-mono text-[11px] ${tCapaConsolidado === '-' ? 'text-slate-400 italic' : 'font-bold text-indigo-900 bg-indigo-50/20 cursor-help'}`}>{tCapaConsolidado}</td>
+                        <td title={tooltipEnc ? `Soma de:\n${tooltipEnc}` : undefined} className={`p-3 text-center font-mono text-[11px] ${tEncConsolidado === '-' ? 'text-slate-400 italic' : 'font-bold text-teal-900 bg-teal-50/20 cursor-help'}`}>{tEncConsolidado}</td>
                         <td className={`p-3 text-center font-mono text-[11px] ${tDob === 'Pend.' ? 'text-slate-400 italic' : 'font-bold text-amber-900 bg-amber-50/20'}`}>{tDob}</td>
                         <td className={`p-3 text-center font-mono text-[11px] ${tAlc === '-' ? 'text-slate-400 italic' : 'font-bold text-purple-900 bg-purple-50/20'}`}>{tAlc}</td>
                         <td className={`p-3 text-center font-mono text-[11px] border-r border-slate-200 ${tFim === '-' ? 'text-slate-400 italic' : 'font-bold text-emerald-900 bg-emerald-50/20'}`}>{tFim}</td>
