@@ -32,7 +32,65 @@ const decimalToTime = (decimalHours: number) => {
   return d > 0 ? `${d} dia${d > 1 ? 's' : ''} + ${hhmm}` : hhmm;
 };
 
-const somarTodasAsStringsDeTempo = (tempos: string[]) => {
+// CSV: horas acumuladas sem quebrar em dias ("2 dias + 01:39" -> "49:39")
+const tempoParaCSV = (timeStr: string) => {
+  const totalMin = Math.round(timeToDecimal(timeStr) * 60);
+  return `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`;
+};
+
+const SECOES_CSV_DETALHADO: Array<[string, string]> = [
+  ['impressao', 'Impressão Miolo'], ['impressao_capa', 'Impressão Capa'],
+  ['impressao_encarte', 'Impressão Encarte'], ['impressao_adesivo', 'Impressão Adesivo'],
+  ['corte_vinco', 'Corte e Vinco'], ['beneficiamento_capa', 'Beneficiamento Capa'],
+  ['empastamento_capa', 'Empastamento Capa'], ['dobra', 'Dobra'],
+  ['alceamento', 'Alceamento'], ['grampo', 'Grampo'], ['espiral', 'Espiral'],
+];
+
+const ETAPAS_CSV_CONSOLIDADO: Array<[string, string]> = [
+  ['impressao', 'T.Impressão'], ['impressao_capa', 'T.Capa'], ['impressao_encarte', 'T.Encarte'],
+  ['dobra', 'T.Dobra'], ['alceamento', 'T.Alceamento'], ['grampo', 'T.Grampo'], ['espiral', 'T.Espiral'],
+];
+
+const CABECALHO_CSV_DETALHADO = 'Gráfica;Lote;SKU;Etapa;Tempo Setup;Tempo Rodagem;Tempo Total';
+const CABECALHO_CSV_CONSOLIDADO = `Gráfica;Lote;SKU;${ETAPAS_CSV_CONSOLIDADO.map(([, l]) => l).join(';')};T.Total`;
+
+const linhasCSVDetalhado = (grafica: string, lote: string, skus: any[]): string[] => {
+  const rows: string[] = [];
+  skus.forEach((s: any) => {
+    if (!s.dados_calculo) return;
+    SECOES_CSV_DETALHADO.forEach(([key, label]) => {
+      const r = s.dados_calculo[key]?.resultado;
+      if (!r?.totais) return;
+      rows.push(`${grafica};${lote};${s.sku_miolo};${label};${tempoParaCSV(r.totais.setup || '00:00')};${tempoParaCSV(r.totais.rodagem || '00:00')};${tempoParaCSV(r.totais.total || '00:00')}`);
+    });
+  });
+  return rows;
+};
+
+const linhasCSVConsolidado = (grafica: string, lote: string, skus: any[]): string[] => {
+  const rows: string[] = [];
+  skus.forEach((s: any) => {
+    if (!s.dados_calculo) return;
+    let totalDec = 0;
+    const tempos = ETAPAS_CSV_CONSOLIDADO.map(([key]) => {
+      const t = s.dados_calculo[key]?.resultado?.totais?.total || '00:00';
+      totalDec += timeToDecimal(t);
+      return tempoParaCSV(t);
+    });
+    rows.push(`${grafica};${lote};${s.sku_miolo};${tempos.join(';')};${tempoParaCSV(decimalToTime(totalDec))}`);
+  });
+  return rows;
+};
+
+const baixarCSV = (linhas: string[], nomeArquivo: string) => {
+  const blob = new Blob(['﻿' + linhas.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url;
+  a.download = nomeArquivo;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+};
+
+const somarTodasAsStringsDeTempo =(tempos: string[]) => {
   let totalMinutos = 0;
   tempos.forEach(t => {
     if (!t || t === 'Pend.' || t === '-') return;
@@ -89,6 +147,7 @@ export default function RegistrosTempo() {
   const [acaoPendenteMassa, setAcaoPendenteMassa] = useState<'calcular' | 'apagar' | null>(null);
   const [statusProducao, setStatusProducao] = useState('');
   const [showCsvDropdown, setShowCsvDropdown] = useState(false);
+  const [exportandoCsvPainel, setExportandoCsvPainel] = useState(false);
 
   // Máquinas alocadas (Edição Manual)
   const [idMaquinaImpressao, setIdMaquinaImpressao] = useState('');
@@ -1345,12 +1404,58 @@ export default function RegistrosTempo() {
           else setLotesSelecionados(lotesFiltrados.map(l => ({ filtro_producao: l.filtro_producao, grafica: l.grafica })));
         };
 
+        // Exporta os lotes selecionados (ou todos os filtrados, se nenhum estiver selecionado)
+        const exportarCSVPainel = async (tipo: 'detalhado' | 'consolidado') => {
+          const alvos = lotesSelecionados.length > 0 ? lotesSelecionados : lotesFiltrados;
+          if (alvos.length === 0) return alert('Nenhum lote para exportar.');
+          setExportandoCsvPainel(true);
+          try {
+            const rows: string[] = [];
+            const lotesBuscados = await Promise.all(alvos.map(async (l: any) => {
+              const res = await fetch(`/api/producao/miolo?grafica=${l.grafica}&filtro=${l.filtro_producao}`);
+              return { l, skusLote: res.ok ? await res.json() : [] };
+            }));
+            lotesBuscados.forEach(({ l, skusLote }) => {
+              rows.push(...(tipo === 'detalhado' ? linhasCSVDetalhado : linhasCSVConsolidado)(l.grafica, l.filtro_producao, skusLote));
+            });
+            if (rows.length === 0) return alert('Nenhum dado calculado para exportar.');
+            baixarCSV(
+              [tipo === 'detalhado' ? CABECALHO_CSV_DETALHADO : CABECALHO_CSV_CONSOLIDADO, ...rows],
+              `${tipo === 'detalhado' ? 'Tempos' : 'Consolidado'}_Painel_${filtroGraficaGlobal || 'TODAS'}.csv`
+            );
+          } catch (e) {
+            console.error('Erro ao exportar CSV do painel', e);
+            alert('Erro ao exportar CSV. Tente novamente.');
+          } finally {
+            setExportandoCsvPainel(false);
+          }
+        };
+
         return (
           <>
             <header className="mb-6 border-b border-slate-200 pb-4 flex flex-col md:flex-row md:justify-between md:items-end gap-4">
               <div>
                 <h1 className="text-2xl font-black text-slate-900 tracking-tight">Painel Unificado de Lotes Industriais</h1>
                 <p className="text-sm text-slate-500 font-medium mt-1">Torre de controle operacional e status global de balanceamento de tempos.</p>
+              </div>
+              <div className="flex gap-2 items-center">
+              <div className="relative">
+                <button onClick={() => setShowCsvDropdown(v => !v)} disabled={exportandoCsvPainel} className="text-sm text-teal-700 font-bold border border-teal-200 px-4 py-2.5 rounded-lg hover:bg-teal-50 shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50">
+                  {exportandoCsvPainel ? <i className="fas fa-spinner fa-spin mr-1"></i> : <i className="fas fa-file-csv mr-1"></i>} Exportar CSV <i className="fas fa-chevron-down text-xs opacity-60"></i>
+                </button>
+                {showCsvDropdown && (
+                  <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-50 min-w-[220px]">
+                    <div className="px-4 py-2 text-[10px] uppercase font-bold text-slate-400 border-b">
+                      {lotesSelecionados.length > 0 ? `${lotesSelecionados.length} lote(s) selecionado(s)` : `Todos os ${lotesFiltrados.length} lotes filtrados`}
+                    </div>
+                    <button onClick={() => { exportarCSVPainel('detalhado'); setShowCsvDropdown(false); }} className="w-full text-left px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 border-b">
+                      <i className="fas fa-list mr-2 text-teal-600"></i> Por Etapas (detalhado)
+                    </button>
+                    <button onClick={() => { exportarCSVPainel('consolidado'); setShowCsvDropdown(false); }} className="w-full text-left px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50">
+                      <i className="fas fa-table mr-2 text-teal-600"></i> Por SKU Consolidado
+                    </button>
+                  </div>
+                )}
               </div>
               <select
                 value={filtroGraficaGlobal}
@@ -1362,6 +1467,7 @@ export default function RegistrosTempo() {
                   <option key={g} value={g}>{g}</option>
                 ))}
               </select>
+              </div>
             </header>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -1623,55 +1729,15 @@ export default function RegistrosTempo() {
         }, 0);
 
         const exportarTemposCSV = () => {
-          const rows: string[] = ['Gráfica;Lote;SKU;Etapa;Tempo Setup;Tempo Rodagem;Tempo Total'];
-          const secoes: Array<[string, string]> = [
-            ['impressao', 'Impressão Miolo'], ['impressao_capa', 'Impressão Capa'],
-            ['impressao_encarte', 'Impressão Encarte'], ['impressao_adesivo', 'Impressão Adesivo'],
-            ['corte_vinco', 'Corte e Vinco'], ['beneficiamento_capa', 'Beneficiamento Capa'],
-            ['empastamento_capa', 'Empastamento Capa'], ['dobra', 'Dobra'],
-            ['alceamento', 'Alceamento'], ['grampo', 'Grampo'], ['espiral', 'Espiral'],
-          ];
-          skus.forEach((s: any) => {
-            if (!s.dados_calculo) return;
-            const dc = s.dados_calculo;
-            secoes.forEach(([key, label]) => {
-              const r = dc[key]?.resultado;
-              if (!r?.totais) return;
-              rows.push(`${grafica};${filtroProducao};${s.sku_miolo};${label};${r.totais.setup || '00:00'};${r.totais.rodagem || '00:00'};${r.totais.total || '00:00'}`);
-            });
-          });
-          if (rows.length <= 1) return alert('Nenhum dado calculado para exportar.');
-          const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a'); a.href = url;
-          a.download = `Tempos_${grafica}_${filtroProducao}.csv`;
-          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          const rows = linhasCSVDetalhado(grafica, filtroProducao, skus);
+          if (rows.length === 0) return alert('Nenhum dado calculado para exportar.');
+          baixarCSV([CABECALHO_CSV_DETALHADO, ...rows], `Tempos_${grafica}_${filtroProducao}.csv`);
         };
 
         const exportarCSVConsolidado = () => {
-          const etapasOrdem: Array<[string, string]> = [
-            ['impressao', 'T.Impressão'], ['impressao_capa', 'T.Capa'], ['impressao_encarte', 'T.Encarte'],
-            ['dobra', 'T.Dobra'], ['alceamento', 'T.Alceamento'], ['grampo', 'T.Grampo'], ['espiral', 'T.Espiral'],
-          ];
-          const header = `Gráfica;Lote;SKU;${etapasOrdem.map(([,l]) => l).join(';')};T.Total`;
-          const rows: string[] = [header];
-          skus.forEach((s: any) => {
-            if (!s.dados_calculo) return;
-            const dc = s.dados_calculo;
-            let totalDec = 0;
-            const tempos = etapasOrdem.map(([key]) => {
-              const t = dc[key]?.resultado?.totais?.total || '00:00';
-              totalDec += timeToDecimal(t);
-              return t;
-            });
-            rows.push(`${grafica};${filtroProducao};${s.sku_miolo};${tempos.join(';')};${decimalToTime(totalDec)}`);
-          });
-          if (rows.length <= 1) return alert('Nenhum dado calculado para exportar.');
-          const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a'); a.href = url;
-          a.download = `Consolidado_${grafica}_${filtroProducao}.csv`;
-          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          const rows = linhasCSVConsolidado(grafica, filtroProducao, skus);
+          if (rows.length === 0) return alert('Nenhum dado calculado para exportar.');
+          baixarCSV([CABECALHO_CSV_CONSOLIDADO, ...rows], `Consolidado_${grafica}_${filtroProducao}.csv`);
         };
 
         return (
